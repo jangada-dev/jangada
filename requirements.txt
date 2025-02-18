@@ -1,0 +1,65 @@
+# The following packages are required to develop the project
+
+# =============================================================================
+# building and distributing
+# =============================================================================
+build                   # https://pypa-build.readthedocs.io/en/latest/
+setuptools              # https://setuptools.pypa.io/en/latest/index.html
+
+
+# -------------------------------------------------------------- Upload to pypi
+twine                   # https://twine.readthedocs.io/en/stable/
+
+# =============================================================================
+# Core : Packages used to run the project
+# =============================================================================
+
+# ---------------------------------------------------- Numerical and Scientific
+numpy                   # https://numpy.org/doc/stable/
+pandas                  # https://pandas.pydata.org/docs/
+
+# ----------------------------------------------------------------- Operational
+astropy                 # https://docs.astropy.org/en/stable/index.html
+# fiona                   # https://fiona.readthedocs.io/en/latest/
+# shapely                 # https://shapely.readthedocs.io/en/stable/manual.html
+
+# ------------------------------------------------------------------ persisting
+h5py                    # https://docs.h5py.org/en/stable/
+
+# -------------------------------------------------------------------- plotting
+#matplotlib              # https://matplotlib.org/stable/
+#PySide2                # https://doc.qt.io/qt-5.15/classes.html
+#PySide2-stubs          # https://github.com/python-qt-tools/PySide2-stubs
+#PyQt5                   # https://doc.qt.io/qt-5.15/classes.html
+#PyQt5-stubs             # https://github.com/python-qt-tools/PyQt5-stubs
+# pyvista                 # https://docs.pyvista.org
+# pyvistaqt               # https://github.com/pyvista/pyvistaqt
+# imageio-ffmpeg          # https://github.com/imageio/imageio-ffmpeg
+
+# ------------------------------------------------------------ downloading data
+# requests                # https://realpython.com/python-requests/
+
+# =============================================================================
+# Testing
+# =============================================================================
+pytest                  # https://docs.pytest.org/en/7.2.x/
+ipython                 # https://ipython.org
+mypy
+pytest-mypy
+
+# =============================================================================
+# Documenting
+# =============================================================================
+sphinx
+docutils # == 0.16.0cd
+esbonio
+
+# ----------------------------------------------------------- sphinx extensions
+numpydoc
+sphinx-design
+sphinx-copybutton
+sphinx-gallery          # https://sphinx-gallery.github.io/stable/getting_started.html
+pillow                  # requirement of sphinx-gallery
+
+# --------------------------------------------------------------- sphinx themes
+pydata-sphinx-theme
