@@ -1,0 +1,30 @@
+.toggle .header {
+    display: block;
+    clear: both;
+    alignment: right;
+    /* background-color: lightgray; */
+    content: "►";
+}
+
+.toggle .header {
+    /* content: "►"; */
+    /* color: blue; */
+    /* padding-left: 16px; */
+}
+
+.toggle .header.open {
+    content: "▼";
+    /* background-color: lightgray; */
+    /* color: blue; */
+    /* padding-left: 16px; */
+}
+
+.toggle .header.highlight {
+    color: blue;
+    cursor: pointer
+    /* padding-left: 16px; */
+}
+
+/*element.style {*/
+/*    display: none;*/
+/*}*/
