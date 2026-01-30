@@ -131,3 +131,7 @@ class TestSerializableProperty:
         # test setter
         obj.name = "My custom name"
         assert obj.name == "My custom name"
+
+        # test resetting
+        obj.name = None
+        assert obj.name == "Unnamed"
