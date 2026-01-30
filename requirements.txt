@@ -19,7 +19,7 @@ numpy                   # https://numpy.org/doc/stable/
 pandas                  # https://pandas.pydata.org/docs/
 
 # ----------------------------------------------------------------- Operational
-astropy                 # https://docs.astropy.org/en/stable/index.html
+# astropy                 # https://docs.astropy.org/en/stable/index.html
 # fiona                   # https://fiona.readthedocs.io/en/latest/
 # shapely                 # https://shapely.readthedocs.io/en/stable/manual.html
 
