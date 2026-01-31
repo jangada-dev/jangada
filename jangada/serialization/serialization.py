@@ -722,6 +722,36 @@ Serializable.register_dataset_type(pandas.DatetimeIndex,
                                    assemble=assemble_pandas_time)
 
 
+# ========== ========== ========== ========== ========== ==========
+class Persistable(Serializable):
+    """Base class for serializable objects that can be persisted to disk."""
+
+    # ========== ========== ========== ========== ========== class attributes
+    extension: str = '.hdf5'
+
+    # ========== ========== ========== ========== ========== special methods
+    ...
+
+    # ========== ========== ========== ========== ========== private methods
+    ...
+
+    # ========== ========== ========== ========== ========== protected methods
+    ...
+
+    # ========== ========== ========== ========== ========== public methods
+    ...
+
+    # ---------- ---------- ---------- ---------- ---------- properties
+    ...
+
+
+
+
+
+
+
+
+
 __all__ = [
     'SerializableProperty',
     'serializable_property',
