@@ -14,7 +14,7 @@ Jangada Project
    Services Overview <contents/introduction/__main>
    contents/tutorials_auto/index
    contents/user_guide/__main
-   contents/api_reference/__main
+   contents/api_reference/index
    contents/gallery/__main
    contents/development/__main
 
