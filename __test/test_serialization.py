@@ -12,7 +12,6 @@ from typing import Any
 
 class TestSerializableProperty:
 
-
     def test_readonly(self) -> None:
         print()
 
