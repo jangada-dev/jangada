@@ -3,6 +3,8 @@
 
 __refs
 
+__test/*.dat
+
 # docs
 __docs/_build/
 

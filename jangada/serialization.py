@@ -655,6 +655,7 @@ class Serializable(metaclass=SerializableMetatype):
                     prop[key] = SerializableProperty()
                     prop[key].__set_name__(cls, key)
                     setattr(cls, key, value)
+                    cls._serializable_properties[key] = prop[key]
 
             return cls(**data)
 

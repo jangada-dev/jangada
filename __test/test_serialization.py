@@ -548,5 +548,28 @@ class TestPersistable:
 
         Path('battery.batt').unlink()
 
+    def test_read_file_with_generic_class(self):
 
+        from astropy import units
+        from numpy.typing import NDArray
+
+        def disassemble_quantity(qtt: units.Quantity) -> tuple[NDArray, dict[str]]:
+            return qtt.value, {'unit': qtt.unit.to_string()}
+
+        def assemble_quantity(qtt_array: NDArray, qtt_attrs: dict[str]) -> units.Quantity:
+            return qtt_array * units.Unit(qtt_attrs['unit'])
+
+        Serializable.register_dataset_type(units.Quantity,
+                                           disassemble=disassemble_quantity,
+                                           assemble=assemble_quantity)
+
+        path = Path(__file__).parent / 'laurent.dat'
+
+        data = Persistable.load(path)
+
+        print(type(data))
+        print(type(data).serializable_properties)
+
+        print(data.name)
+        print(data.antenna1.frequency)
 
