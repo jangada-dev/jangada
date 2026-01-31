@@ -16,6 +16,7 @@ Getter: TypeAlias = Callable[[object], T]
 Setter: TypeAlias = Callable[[object, Any], None]
 Deleter: TypeAlias = Callable[[object], None]
 
+Observer: TypeAlias = Callable[[object, T, T], None]
 Parser: TypeAlias = Callable[[object, Any], T]
 
 
@@ -23,8 +24,9 @@ class SerializableProperty:
 
     # ========== ========== ========== ========== ========== class attributes
     __slots__ = ('fget', 'fset', 'fdel',
-                 '_default', '_parser', 'writeonce', 'copiable',
-                 'name', 'owner', '__doc__', '__weakref__')
+                 '_default', '_parser', '_observer',
+                 'writeonce', 'copiable', 'readonly',
+                 'name', 'private_name', 'owner', '__doc__', '__weakref__')
 
     # ========== ========== ========== ========== ========== special methods
     def __init__(self,
@@ -34,6 +36,8 @@ class SerializableProperty:
                  *,
                  default: T | Getter | None = None,
                  parser: Parser | None = None,
+                 observer: Observer | None = None,
+                 readonly: bool = False,
                  writeonce: bool = False,
                  copiable: bool = True,
                  doc: str | None = None) -> None:
@@ -44,8 +48,14 @@ class SerializableProperty:
 
         self._default: T | Getter | None = default
         self._parser: Parser | None = parser
+        self._observer: Observer | None = observer
+
+        self.readonly: bool = readonly
         self.writeonce: bool = writeonce
         self.copiable: bool = copiable
+
+        if self.readonly:
+            self.fset = None
 
         # Use getter docstring if not provided (which can also be None)
         self.__doc__: str | None = fget.__doc__ if doc is None and fget is not None else doc
@@ -54,6 +64,13 @@ class SerializableProperty:
         """Called when the descriptor is assigned to a class attribute."""
         self.name: str = name
         self.owner: type = owner
+        self.private_name: str = f"_serializable_property__{name}"
+
+        if self.fget is None:
+            self.fget = lambda obj: getattr(obj, self.private_name)
+
+        if self.fset is None and not self.readonly:
+            self.fset = lambda obj, value: setattr(obj, self.private_name, value)
 
     def __get__(self, instance: object|None, owner: type) -> T|Self:
         """Get the property value."""
@@ -111,7 +128,12 @@ class SerializableProperty:
         if self._parser is not None:
             value = self._parser(instance, value)
 
+        old_value = self.__get__(instance, self.owner)
+
         self.fset(instance, value)
+
+        if self._observer is not None:
+            self._observer(instance, old_value, value)
 
     def __delete__(self, instance: object) -> None:
         """Delete the property value."""
@@ -127,6 +149,8 @@ class SerializableProperty:
             fget, self.fset, self.fdel,
             default=self._default,
             parser=self._parser,
+            observer=self._observer,
+            readonly=self.readonly,
             writeonce=self.writeonce,
             copiable=self.copiable,
             doc=self.__doc__
@@ -138,6 +162,8 @@ class SerializableProperty:
             self.fget, fset, self.fdel,
             default=self._default,
             parser=self._parser,
+            observer=self._observer,
+            readonly=self.readonly,
             writeonce=self.writeonce,
             copiable=self.copiable,
             doc=self.__doc__
@@ -149,6 +175,8 @@ class SerializableProperty:
             self.fget, self.fset, fdel,
             default=self._default,
             parser=self._parser,
+            observer=self._observer,
+            readonly=self.readonly,
             writeonce=self.writeonce,
             copiable=self.copiable,
             doc=self.__doc__
@@ -161,8 +189,11 @@ class SerializableProperty:
             self.fget, self.fset, self.fdel,
             default=func,
             parser=self._parser,
+            observer=self._observer,
+            readonly=self.readonly,
             writeonce=self.writeonce,
             copiable=self.copiable,
+            doc=self.__doc__
         )
 
     def parser(self, func: Parser) -> Self:
@@ -171,8 +202,24 @@ class SerializableProperty:
             self.fget, self.fset, self.fdel,
             default=self._default,
             parser=func,
+            observer=self._observer,
+            readonly=self.readonly,
             writeonce=self.writeonce,
             copiable=self.copiable,
+            doc=self.__doc__
+        )
+
+    def observer(self, func: Observer) -> Self:
+        """Set the observer function."""
+        return type(self)(
+            self.fget, self.fset, self.fdel,
+            default=self._default,
+            parser=self._parser,
+            observer=func,
+            readonly=self.readonly,
+            writeonce=self.writeonce,
+            copiable=self.copiable,
+            doc=self.__doc__
         )
 
     @property
@@ -187,12 +234,16 @@ class SerializableProperty:
 
 
 def serializable_property(
+        default: T | Getter | None = None,
+        readonly: bool = False,
         writeonce: bool = False,
         copiable: bool = True) -> Callable[[Getter], SerializableProperty]:
 
     def decorator(getter: Getter) -> SerializableProperty:
         return SerializableProperty(
             fget=getter,
+            default=default,
+            readonly=readonly,
             writeonce=writeonce,
             copiable=copiable,
         )

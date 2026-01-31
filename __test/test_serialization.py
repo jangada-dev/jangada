@@ -18,7 +18,7 @@ class TestSerializableProperty:
 
         class ReadOnlyExample:
 
-            @serializable_property()
+            @serializable_property(readonly=True, default="default")
             def attr(self) -> str:
                 return "attr"
 
@@ -35,7 +35,7 @@ class TestSerializableProperty:
         else:
             assert False
 
-    def test_writeonce(self):
+    def test_writeonce(self) -> None:
         print()
 
         class WriteOnceExample:
@@ -73,14 +73,6 @@ class TestSerializableProperty:
 
             id = SerializableProperty(copiable=False, writeonce=True)
 
-            @id.getter
-            def id(self) -> str:
-                return self._id
-
-            @id.setter
-            def id(self, value: str) -> None:
-                self._id = value
-
             @id.default
             def id(self) -> str:
                 return str(uuid.uuid4().hex)
@@ -116,14 +108,6 @@ class TestSerializableProperty:
         class Nameable:
             name = SerializableProperty(default="Unnamed")
 
-            @name.getter
-            def name(self) -> str:
-                return self._name
-
-            @name.setter
-            def name(self, value: str) -> None:
-                self._name = value
-
         # test default
         obj = Nameable()
         assert obj.name == "Unnamed"
@@ -135,3 +119,43 @@ class TestSerializableProperty:
         # test resetting
         obj.name = None
         assert obj.name == "Unnamed"
+
+    def test_programatically_defined_properties(self) -> None:
+        print()
+
+        class Point:
+
+            x = SerializableProperty()
+            y = SerializableProperty(default=0)
+            z = SerializableProperty(default=0)
+
+            @x.parser
+            def x(self, value: Any) -> float:
+                return float(value) if value is not None else None
+
+            @x.observer
+            def x(self, old_value: float, new_value: float) -> None:
+                print(f"x changed from {old_value} to {new_value}")
+
+        p = Point()
+
+        assert p.x is None
+        assert p.y == 0.0
+        assert p.z == 0.0
+
+        p.x = '10.0'
+        p.y = 20.0
+        p.z = 30.0
+
+        assert p.x == 10.0
+        assert p.y == 20.0
+        assert p.z == 30.0
+
+        p.x = None
+        assert p.x is None
+
+        p.y = None
+        assert p.y == 0.0
+
+        p.z = None
+        assert p.z == 0.0
