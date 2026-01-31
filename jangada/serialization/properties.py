@@ -25,7 +25,7 @@ class SerializableProperty:
     # ========== ========== ========== ========== ========== class attributes
     __slots__ = ('fget', 'fset', 'fdel',
                  '_default', '_parser', '_observer',
-                 'writeonce', 'copiable', 'readonly',
+                 '_writeonce', '_copiable', '_readonly',
                  'name', 'private_name', 'owner', '__doc__', '__weakref__')
 
     # ========== ========== ========== ========== ========== special methods
@@ -50,11 +50,11 @@ class SerializableProperty:
         self._parser: Parser | None = parser
         self._observer: Observer | None = observer
 
-        self.readonly: bool = readonly
-        self.writeonce: bool = writeonce
-        self.copiable: bool = copiable
+        self._readonly: bool = readonly
+        self._writeonce: bool = writeonce
+        self._copiable: bool = copiable
 
-        if self.readonly:
+        if self._readonly:
             self.fset = None
 
         # Use getter docstring if not provided (which can also be None)
@@ -69,7 +69,7 @@ class SerializableProperty:
         if self.fget is None:
             self.fget = lambda obj: getattr(obj, self.private_name)
 
-        if self.fset is None and not self.readonly:
+        if self.fset is None and not self._readonly:
             self.fset = lambda obj, value: setattr(obj, self.private_name, value)
 
     def __get__(self, instance: object|None, owner: type) -> T|Self:
@@ -104,7 +104,7 @@ class SerializableProperty:
                 f"can't set attribute '{self.name}' (read-only property)"
             )
 
-        if self.writeonce:
+        if self._writeonce:
             # Check if already set (write-once behavior)
 
             try:
@@ -150,9 +150,9 @@ class SerializableProperty:
             default=self._default,
             parser=self._parser,
             observer=self._observer,
-            readonly=self.readonly,
-            writeonce=self.writeonce,
-            copiable=self.copiable,
+            readonly=self._readonly,
+            writeonce=self._writeonce,
+            copiable=self._copiable,
             doc=self.__doc__
         )
 
@@ -163,9 +163,9 @@ class SerializableProperty:
             default=self._default,
             parser=self._parser,
             observer=self._observer,
-            readonly=self.readonly,
-            writeonce=self.writeonce,
-            copiable=self.copiable,
+            readonly=self._readonly,
+            writeonce=self._writeonce,
+            copiable=self._copiable,
             doc=self.__doc__
         )
 
@@ -176,9 +176,9 @@ class SerializableProperty:
             default=self._default,
             parser=self._parser,
             observer=self._observer,
-            readonly=self.readonly,
-            writeonce=self.writeonce,
-            copiable=self.copiable,
+            readonly=self._readonly,
+            writeonce=self._writeonce,
+            copiable=self._copiable,
             doc=self.__doc__
         )
 
@@ -190,9 +190,9 @@ class SerializableProperty:
             default=func,
             parser=self._parser,
             observer=self._observer,
-            readonly=self.readonly,
-            writeonce=self.writeonce,
-            copiable=self.copiable,
+            readonly=self._readonly,
+            writeonce=self._writeonce,
+            copiable=self._copiable,
             doc=self.__doc__
         )
 
@@ -203,9 +203,9 @@ class SerializableProperty:
             default=self._default,
             parser=func,
             observer=self._observer,
-            readonly=self.readonly,
-            writeonce=self.writeonce,
-            copiable=self.copiable,
+            readonly=self._readonly,
+            writeonce=self._writeonce,
+            copiable=self._copiable,
             doc=self.__doc__
         )
 
@@ -216,21 +216,26 @@ class SerializableProperty:
             default=self._default,
             parser=self._parser,
             observer=func,
-            readonly=self.readonly,
-            writeonce=self.writeonce,
-            copiable=self.copiable,
+            readonly=self._readonly,
+            writeonce=self._writeonce,
+            copiable=self._copiable,
             doc=self.__doc__
         )
 
     @property
-    def is_readonly(self) -> bool:
+    def readonly(self) -> bool:
         """Check if property is read-only (no setter)."""
-        return self.fset is None
+        return self._readonly
 
     @property
-    def is_writeonce(self) -> bool:
+    def writeonce(self) -> bool:
         """Check if property is write-once property."""
-        return self.writeonce
+        return self._writeonce
+
+    @property
+    def copiable(self) -> bool:
+        """Check if property is copiable property."""
+        return self._copiable
 
 
 def serializable_property(
