@@ -7,17 +7,18 @@ from __future__ import annotations
 
 import weakref
 
-from numbers import Number
-from pathlib import Path
-
 import numpy
 import pandas
+import h5py
 
 from abc import ABCMeta, abstractmethod
+from numbers import Number
+from pathlib import Path
 
 # ---------- ---------- ---------- ---------- ---------- ---------- typing
 from typing import TypeVar, Callable, Any, TypeAlias, Self, Type
 
+from astropy.io.fits import file
 from numpy.typing import NDArray
 
 
@@ -729,31 +730,263 @@ class Persistable(Serializable):
     # ========== ========== ========== ========== ========== class attributes
     extension: str = '.hdf5'
 
+    class ProxyDataset:
+        # TODO: this class should extend Representable for useful info in console
+
+        def __init__(self, dataset: h5py.Dataset) -> None:
+            self._dataset = dataset
+            self._attrs = {k: Persistable._load_data_from_h5py_tree(v) for k, v in self._dataset.attrs.items()}
+            self._dataset_type_name = self._attrs.pop('__dataset_type__')
+
+        def __getitem__(self, item) -> Any:
+            assemble = Serializable._dataset_types[self._dataset_type_name]['assemble']
+            array = self._dataset[item]
+
+            return assemble(array, self.attrs)
+
+        def __setitem__(self, key, value) -> None:
+
+            # this code block is meant to test if key is inside the dataset limits,
+            # otherwise resizing it. This is actually pretty experimental, but passed
+            # in the proposed tests
+            if isinstance(key, slice) and key.stop >= self.shape[0]:
+                self._dataset.resize(key.stop + 1, axis=0)
+
+            elif isinstance(key, int) and key >= self.shape[0]:
+                self._dataset.resize(key + 1, axis=0)
+
+            # this code block is reliable and tested
+            disassemble = Serializable._dataset_types[self._dataset_type_name]['disassemble']
+            arr, attrs = disassemble(value)
+
+            assert attrs == self.attrs
+
+            self._dataset[key] = arr
+
+        def append(self, value: Any) -> None:
+
+            disassemble = Serializable._dataset_types[self._dataset_type_name]['disassemble']
+            arr, attrs = disassemble(value)
+            assert attrs == self.attrs
+
+            old_size = self.shape[0]
+            new_size = old_size + arr.shape[0]
+
+            self._dataset.resize(new_size, axis=0)
+
+            self._dataset[old_size:new_size] = arr
+
+        @property
+        def attrs(self) -> dict:
+            return self._attrs.copy()
+
+        # ---------- ---------- ---------- ---------- ---------- ----------
+        @property
+        def shape(self) -> tuple[int]:
+            return self._dataset.shape
+
+        @property
+        def size(self) -> int:
+            return self._dataset.size
+
+        @property
+        def dtype(self) -> numpy.dtype:
+            return self._dataset.dtype
+
+        @property
+        def ndim(self) -> int:
+            return self._dataset.ndim
+
+        @property
+        def nbytes(self) -> int:
+            return self._dataset.nbytes
+
     # ========== ========== ========== ========== ========== special methods
-    ...
+    def __init__(self, *args, **kwargs) -> None:
+
+        if args and isinstance(args[0], (str, Path)):
+
+            filepath = Path(args[0])
+            if not kwargs:
+                # then it's trying to load a file
+                data = self.load_serialized_data(filepath)
+                self._initialize_from_data(data)
+
+            else:
+                # then it must be trying to open the file
+                self._path = filepath
+                self._mode = kwargs.pop('mode')
+                # refer to https://docs.h5py.org/en/stable/high/file.html#opening-creating-files
+                # when writing docs
+
+                if kwargs:
+                    raise ValueError(f'Unexpected keyword arguments: {kwargs.keys()}')
+        else:
+            super().__init__(*args, **kwargs)
+
+
+    def __enter__(self) -> Persistable:
+
+        self.__file = h5py.File(self._path, mode=self._mode)
+
+        data = type(self)._load_data_from_h5py_tree(self.__file['root'], use_proxy_dataset=True)
+
+        self._initialize_from_data(data)
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.__file.close()
 
     # ========== ========== ========== ========== ========== private methods
     ...
 
     # ========== ========== ========== ========== ========== protected methods
-    ...
+    @staticmethod
+    def _save_data_in_group(key: str, value: Any, group: h5py.Group) -> None:
+
+        if value is None:
+            group.attrs[key] = 'NoneType:None'
+
+        elif isinstance(value, Path):
+            group.attrs[key] = f'Path:{str(value.absolute())}'
+
+        elif isinstance(value, (str, Number)):
+            group.attrs[key] = value
+
+        elif isinstance(value, list):
+            subgroup = group.create_group(key, track_order=True)
+            subgroup.attrs['__container_type__'] = 'list'
+
+            for idx, obj in enumerate(value):
+                Persistable._save_data_in_group(str(idx), obj, subgroup)
+
+        elif isinstance(value, dict):
+            subgroup = group.create_group(key)
+            subgroup.attrs['__container_type__'] = 'dict'
+
+            for _key, obj in value.items():
+                Persistable._save_data_in_group(_key, obj, subgroup)
+
+        elif type(value) in Serializable.dataset_types:
+
+            disassemble = Serializable._dataset_types[type(value)]['disassemble']
+
+            value_array, value_attrs = disassemble(value)
+
+            if value_array.ndim > 0:
+                shape = value_array.shape
+                maxshape = (None, *shape[1:])
+                dataset = group.create_dataset(key, data=value_array, maxshape=maxshape)
+            else:  # scalar dataset cannot be extended
+                dataset = group.create_dataset(key, data=value_array)
+
+            dataset.attrs['__dataset_type__'] = get_full_qualified_name(type(value))
+
+            for _key, obj in value_attrs.items():
+                dataset.attrs[_key] = obj if obj is not None else 'NoneType:None'
+
+        else:
+            raise TypeError(f"instances of {type(value).__name__} cannot be saved in h5py.Groups")
+
+    @staticmethod
+    def _load_data_from_h5py_tree(value: Any, use_proxy_dataset: bool = False) -> Any:
+
+        if isinstance(value, h5py.Group):
+
+            data = {k: Persistable._load_data_from_h5py_tree(v, use_proxy_dataset=use_proxy_dataset) for k, v in value.items()}
+            data.update({k: Persistable._load_data_from_h5py_tree(v, use_proxy_dataset=use_proxy_dataset) for k, v in value.attrs.items()})
+
+            # it must have a __container_type__ attr
+            container_type = data.pop('__container_type__')
+
+            if container_type == 'list':
+                return [data[key] for key in sorted(data.keys())]
+
+            if container_type == 'dict':
+                return data
+
+            raise ValueError(f"Could not resolve __container_type__={container_type}")
+
+        if isinstance(value, h5py.Dataset):
+
+            if use_proxy_dataset:
+                return Persistable.ProxyDataset(value)
+
+            array = value[...]
+            attrs = {k: Persistable._load_data_from_h5py_tree(v, use_proxy_dataset=True) for k, v in value.attrs.items()}
+
+            # it must have a __dataset_type__ attr
+            dataset_type_name = attrs.pop('__dataset_type__')
+
+            assemble = Serializable._dataset_types[dataset_type_name]['assemble']
+
+            return assemble(array, attrs)
+
+        if isinstance(value, str):
+
+            if value == 'NoneType:None':
+                return None
+
+            if value.startswith('Path:'):
+                return Path(value.removeprefix('Path:'))
+
+            return value  # just regular strings
+
+        if isinstance(value, numpy.bool_):
+            return bool(value)
+
+        return value  # basically numbers
 
     # ========== ========== ========== ========== ========== public methods
-    ...
+    def save_serialized_data(self, path: Path|str, data: Any) -> None:
+        with h5py.File(Path(path), 'w') as file:
+            self._save_data_in_group('root', data, file)
+
+    @classmethod
+    def load_serialized_data(cls, path: Path|str) -> Any:
+        path = Path(path)
+
+        if not path.is_file():
+            raise FileNotFoundError(f"Path {path} does not exist")
+
+        with h5py.File(path, 'r') as file:
+            data = cls._load_data_from_h5py_tree(file['root'])
+
+        return data
+
+    def save(self,
+             path: Path | str,
+             overwrite: bool = True,
+             use_default_extension: bool = True) -> None:
+
+        # ---------- ---------- resolve path
+        path = Path(path)
+
+        if use_default_extension:
+            path = path.with_suffix(type(self).extension)
+
+        if path.is_file() and not overwrite:
+            raise FileExistsError(f"Path {path} already exists")
+
+        # ---------- ---------- save
+        data = Serializable.serialize(self)
+        self.save_serialized_data(path, data)
+
+    @classmethod
+    def load(cls, path: Path|str) -> Persistable:
+
+        data = cls.load_serialized_data(path)
+        return Serializable.deserialize(data)
 
     # ---------- ---------- ---------- ---------- ---------- properties
     ...
 
-
-
-
-
-
-
-
+Serializable.register_primitive_type(Persistable.ProxyDataset)
 
 __all__ = [
     'SerializableProperty',
     'serializable_property',
-    'Serializable'
+    'Serializable',
+    'Persistable'
 ]

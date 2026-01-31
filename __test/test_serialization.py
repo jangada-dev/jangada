@@ -7,9 +7,10 @@ import pytest
 
 import numpy, pandas
 from pathlib import Path
-
+from time import sleep
 
 from jangada.serialization import Serializable, serializable_property, SerializableProperty
+from jangada.serialization import Persistable
 
 from typing import Any
 
@@ -387,3 +388,165 @@ class TesteSerializable:
         # for curiosity
         print()
         beeprint.pp(Serializable.serialize(mesh), indent=4)
+
+
+class TestPersistable:
+
+    @pytest.fixture
+    def custom_persistable(self) -> tuple[Serializable, Persistable]:
+
+        class Cell(Serializable):
+            voltage = SerializableProperty()
+            current = SerializableProperty()
+            label = SerializableProperty()
+            description = SerializableProperty()
+
+        class Battery(Persistable):
+
+            on = SerializableProperty()
+            temperature = SerializableProperty()
+            current = SerializableProperty()
+            cells = SerializableProperty()
+            time = SerializableProperty()
+            position = SerializableProperty()
+            description = SerializableProperty()
+            instant = SerializableProperty()
+            filepath = SerializableProperty()
+
+            extension = '.batt'
+
+        return Cell, Battery
+
+    def test_saving_and_loading(self, custom_persistable: tuple[Serializable, Persistable]) -> None:
+        Cell, Battery = custom_persistable
+
+        dti = pandas.date_range(start='2012-03-18 14:20:03.564957842',
+                                end='2022-10-18 17:34:57.123456789',
+                                periods=100)
+        dti = dti.tz_localize('America/Sao_Paulo')
+
+        # ========== ========== ========== ========== ========== saving
+        cells = [
+            Cell(voltage=numpy.random.randn(100), label='cell-A'),  # this is a numpy array
+            Cell(voltage=numpy.random.randn(100), label='cell-B'),
+            Cell(voltage=numpy.random.randn(100), label='cell-C'),
+        ]
+
+        battery = Battery(on=True,
+                          temperature=numpy.random.randn(100),
+                          current=numpy.random.randn(100),
+                          description='Battery North',
+                          cells=cells,
+                          time=dti,
+                          instant=dti[0],
+                          filepath=Path(__file__).parent)
+
+        battery.save('battery.batt', overwrite=True)
+
+        sleep(1)
+
+        # ========== ========== ========== ========== ========== loading
+        bat1 = Battery('battery.batt')
+        bat2 = Persistable.load('battery.batt')
+
+        print(bat2.instant)
+
+        assert bat1 == battery
+        assert bat2 == battery
+
+        Path('battery.batt').unlink()
+
+        assert bat1.on
+        assert bat1.on.__class__ is bool
+        assert bat1.cells[0].description is None
+
+    def test_opening_in_read_mode(self, custom_persistable) -> None:
+        Cell, Battery = custom_persistable
+
+        # ========== ========== ========== ========== ========== saving
+        cells = [
+            Cell(voltage=numpy.random.randn(100), label='cell-A'),  # this is a numpy array
+            Cell(voltage=numpy.random.randn(100), label='cell-B'),
+            Cell(voltage=numpy.random.randn(100), label='cell-C'),
+        ]
+
+        battery = Battery(on=True,
+                          temperature=numpy.random.randn(100),
+                          current=numpy.random.randn(100),
+                          position=1,
+                          description='Battery North',
+                          cells=cells)
+
+        battery.save('battery.batt', overwrite=True)
+
+        # ========== ========== ========== ========== ========== ==========
+        sleep(2)
+        # ========== ========== ========== ========== ========== ==========
+
+        with Battery('battery.batt', mode='r') as batt:
+
+            assert batt.on
+            assert isinstance(batt.temperature, Persistable.ProxyDataset)
+            assert isinstance(batt.cells[0].voltage, Persistable.ProxyDataset)
+            assert numpy.all(batt.temperature[...] == battery.temperature)
+            assert numpy.all(batt.temperature[:] == battery.temperature)
+            assert numpy.all(batt.temperature[5:-5] == battery.temperature[5:-5])
+
+            assert batt.temperature.shape == battery.temperature.shape
+            assert batt.temperature.ndim == battery.temperature.ndim
+            assert batt.temperature.dtype == battery.temperature.dtype
+            assert batt.temperature.size == battery.temperature.size
+
+        Path('battery.batt').unlink()
+
+    def test_opening_in_write_mode(self, custom_persistable) -> None:
+        Cell, Battery = custom_persistable
+
+        # ========== ========== ========== ========== ========== saving
+        cells = [
+            Cell(voltage=numpy.random.randn(100), label='cell-A'),  # this is a numpy array
+            Cell(voltage=numpy.random.randn(100), label='cell-B'),
+            Cell(voltage=numpy.random.randn(100), label='cell-C'),
+        ]
+
+        battery = Battery(on=True,
+                          temperature=numpy.random.randn(100) ,
+                          current=numpy.random.randn(100),
+                          position=1,
+                          description='Battery North',
+                          cells=cells)
+
+        battery.save('battery.batt', overwrite=True)
+
+        # ========== ========== ========== ========== ========== ==========
+        sleep(2)
+        # ========== ========== ========== ========== ========== ==========
+
+        with Battery('battery.batt', mode='a') as batt:
+
+            # replacing
+            rplc_temp = numpy.random.randn(5)
+            batt.temperature[5:10] = rplc_temp
+            assert numpy.all(batt.temperature[5:10] == rplc_temp)
+
+            # appending by slice
+            appd_temp_1 = numpy.random.randn(30)
+            batt.temperature[100:130] = appd_temp_1
+
+            # appending by using the method append
+            appd_temp_2 = numpy.random.randn(30)
+            batt.temperature.append(appd_temp_2)
+
+            assert numpy.all(batt.temperature[100:130] == appd_temp_1)
+            assert numpy.all(batt.temperature[-30:] == appd_temp_2)
+
+        # checking if the modifications persists
+        with Battery('battery.batt', mode='r') as batt_2:
+            assert numpy.all(batt_2.temperature[5:10] == rplc_temp)
+            assert numpy.all(batt_2.temperature[100:130] == appd_temp_1)
+            assert numpy.all(batt_2.temperature[-30:] == appd_temp_2)
+
+        Path('battery.batt').unlink()
+
+
+
