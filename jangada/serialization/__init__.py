@@ -2,3 +2,5 @@
 """
 Author: Rafael R. L. Benevides
 """
+
+from .serialization import *

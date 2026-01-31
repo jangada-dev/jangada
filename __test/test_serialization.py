@@ -5,7 +5,11 @@ Author: Rafael R. L. Benevides
 
 import pytest
 
-from jangada.serialization.properties import serializable_property, SerializableProperty
+import numpy, pandas
+from pathlib import Path
+
+
+from jangada.serialization import Serializable, serializable_property, SerializableProperty
 
 from typing import Any
 
@@ -119,7 +123,7 @@ class TestSerializableProperty:
         obj.name = None
         assert obj.name == "Unnamed"
 
-    def test_programatically_defined_properties(self) -> None:
+    def test_integration_3(self) -> None:
         print()
 
         class Point:
@@ -158,3 +162,228 @@ class TestSerializableProperty:
 
         p.z = None
         assert p.z == 0.0
+
+    def test_programatically_defined_properties(self) -> None:
+        print()
+
+        class Orbit(Serializable):
+            pass
+
+        # After class definition, add properties programmatically
+        for prop_name in ['semi_major_axis', 'eccentricity', 'inclination']:
+            prop = SerializableProperty(default=0.0)
+            prop.__set_name__(Orbit, prop_name)
+            setattr(Orbit, prop_name, prop)
+
+        obj = Orbit()
+
+        print(obj.inclination)
+
+
+class TesteSerializable:
+
+    def test_Serializable(self) -> None:
+
+        class Nameable:
+            name = SerializableProperty(default="Unnamed")
+
+
+        class Person(Serializable, Nameable):
+            age = SerializableProperty(default=0, copiable=False)
+
+        class Car(Serializable):
+            pass
+
+
+        assert 'name' in Person.serializable_properties
+        assert 'age' in Person.serializable_properties
+
+        print(Person.copiable_properties.keys())
+
+        print(Car.serializable_properties)
+
+
+    @pytest.fixture
+    def example_primitive_type(self) -> list:
+        return [
+            # str
+            'some text',
+
+            #  numbers.Number
+            True,
+            False,
+            1,
+            1.0,
+            1.0j,
+
+            # numpy.ndarray
+            numpy.array(1.0),
+            numpy.array([1.0]),
+            numpy.array([[1.0]]),
+
+            Path(__file__).parent
+        ]
+
+    @pytest.fixture
+    def custom_serialisable(self) -> tuple[Serializable, ...]:
+
+        class Point(Serializable):
+            x = SerializableProperty()
+            y = SerializableProperty()
+
+            def translate(self, dx: float, dy: float) -> 'Point':
+                return Point(x=self.x + dx, y=self.y + dy)
+
+
+        class Triangle(Serializable):
+
+            p1 = SerializableProperty()
+            p2 = SerializableProperty()
+            p3 = SerializableProperty()
+
+            def translate(self, dx: float, dy: float) -> 'Triangle':
+                p1 = self.p1.translate(dx, dy)
+                p2 = self.p2.translate(dx, dy)
+                p3 = self.p3.translate(dx, dy)
+
+                return Triangle(p1=p1, p2=p2, p3=p3)
+
+        class Mesh(Serializable):
+
+            triangles = SerializableProperty()
+            name = SerializableProperty(default="Unnamed")
+
+        return Point, Triangle, Mesh
+
+    # ========== ========== ========== ========== primitive types
+    def test_serialise_primitive_type(self, example_primitive_type):
+
+        for obj in example_primitive_type:
+            assert numpy.all(Serializable.serialize(obj) == obj), obj
+
+    def test_deserialize_primitive_type(self, example_primitive_type):
+
+        for obj in example_primitive_type:
+            assert numpy.all(Serializable.deserialize(obj) == obj), obj
+
+    # ========== ========== ========== ========== containers
+    def test_serialise_containers(self, example_primitive_type):
+
+        data = [
+            {
+                'given': example_primitive_type,
+                'expected': example_primitive_type
+            },
+            {
+                'given': tuple(example_primitive_type),
+                'expected': example_primitive_type
+            },
+            {
+                'given': {f'{k}': v for k, v in enumerate(example_primitive_type)},
+                'expected': {f'{k}': v for k, v in enumerate(example_primitive_type)}
+            }
+        ]
+
+        for item in data:
+            given = item['given']
+            expected = item['expected']
+            assert numpy.all(Serializable.serialize(given) == expected), given
+
+    def test_deserialize_containers(self, example_primitive_type):
+
+        data = [
+            {
+                'given': example_primitive_type,
+                'expected': example_primitive_type
+            },
+            {
+                'given': {f'{k}': v for k, v in enumerate(example_primitive_type)},
+                'expected': {f'{k}': v for k, v in enumerate(example_primitive_type)}
+            }
+        ]
+
+        for item in data:
+            given = item['given']
+            expected = item['expected']
+            assert numpy.all(Serializable.deserialize(given) == expected), given
+
+    # ========== ========== ========== ========== subclassing
+    def test_subclassing(self, custom_serialisable):
+
+        Point, Triangle, Mesh = custom_serialisable
+
+        assert Point in Serializable
+        assert Triangle in Serializable
+        assert Mesh in Serializable
+
+    def test_subclass_instances(self, custom_serialisable):
+
+        Point, Triangle, Mesh = custom_serialisable
+
+        # ---------- ---------- ---------- ---------- empty instance
+        point = Point()
+        assert point.x is None
+        assert point.y is None
+
+        # ---------- ---------- ---------- ---------- lack data
+        point = Point(x=1.0)
+        assert point.x == 1.0
+        assert point.y is None
+
+        # ---------- ---------- ---------- ---------- full data
+        point = Point(x=1.0, y=-1.0)
+        assert point.x == 1.0
+        assert point.y == -1.0
+
+        # ---------- ---------- ---------- ---------- comparison
+        p1 = Point(x=1.0, y=-1.0)
+        p2 = Point(x=1, y=-1)
+        p3 = Point(x=0, y=0)
+
+        assert p1 == p2
+        assert p1 != p3
+
+        # ---------- ---------- ---------- ---------- copying
+        point_original = Point(x=1.0, y=-1.0)
+        point_copied1 = Point(point_original)
+        point_copied2 = point_original.copy()
+
+        assert point_original == point_copied1
+        assert not (point_original is point_copied1)
+
+        assert point_original == point_copied2
+        assert not (point_original is point_copied2)
+
+    def test_serialise_subclass_instances(self, custom_serialisable):
+
+        print()
+        import beeprint
+
+        Point, Triangle, Mesh = custom_serialisable
+
+        km = 1000.0
+
+        p1 = Point(x=0.0 * km, y=4.0 * km)
+        p2 = Point(x=1.0 * km, y=5.0 * km)
+        p3 = Point(x=2.0 * km, y=3.0 * km)
+
+        triangle = Triangle(p1=p1, p2=p2, p3=p3)
+
+        triangles = [
+            triangle.translate(+5 * km, +5 * km),
+            triangle.translate(-5 * km, -5 * km),
+            triangle.translate(-5 * km, +5 * km),
+            triangle.translate(+5 * km, -5 * km)
+        ]
+
+        mesh = Mesh(triangles=triangles, name='mymesh')
+
+        assert triangles == mesh.triangles
+        assert not (triangles is mesh.triangles)  # since a copy has been made
+        assert Mesh(mesh) == mesh
+        assert mesh.copy() == mesh
+        assert Mesh(**Serializable.serialize(mesh)) == mesh
+
+        # for curiosity
+        print()
+        beeprint.pp(Serializable.serialize(mesh), indent=4)

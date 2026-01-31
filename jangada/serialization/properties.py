@@ -15,7 +15,6 @@ T = TypeVar('T')
 Getter: TypeAlias = Callable[[object], T]
 Setter: TypeAlias = Callable[[object, Any], None]
 Deleter: TypeAlias = Callable[[object], None]
-
 Observer: TypeAlias = Callable[[object, T, T], None]
 Parser: TypeAlias = Callable[[object, Any], T]
 
@@ -53,6 +52,9 @@ class SerializableProperty:
         self._readonly: bool = readonly
         self._writeonce: bool = writeonce
         self._copiable: bool = copiable
+
+        if readonly and writeonce:
+            raise ValueError("Cannot be both readonly and writeonce")
 
         if self._readonly:
             self.fset = None
@@ -114,7 +116,7 @@ class SerializableProperty:
 
             if current_value is not None:
                 raise AttributeError(
-                    f"{self.name} is a write-once property and has already been set with value {current_value}"
+                    f"{self.name} is a write-once property and has already been set"
                 )
 
         if value is None:
