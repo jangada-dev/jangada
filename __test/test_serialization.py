@@ -540,7 +540,7 @@ class TestPersistable:
             assert numpy.all(batt.temperature[100:130] == appd_temp_1)
             assert numpy.all(batt.temperature[-30:] == appd_temp_2)
 
-        # checking if the modifications persists
+        # checking if the modification persists
         with Battery('battery.batt', mode='r') as batt_2:
             assert numpy.all(batt_2.temperature[5:10] == rplc_temp)
             assert numpy.all(batt_2.temperature[100:130] == appd_temp_1)

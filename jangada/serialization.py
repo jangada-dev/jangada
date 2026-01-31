@@ -1,24 +1,35 @@
 #  -*- coding: utf-8 -*-
 """
+Serialization and persistence framework for Jangada.
+
+This module provides a declarative and extensible system for serializing
+Python object graphs and persisting them to disk using HDF5.
+
+The framework is composed of three layers:
+
+- SerializableProperty: descriptor-based property schema definition.
+- Serializable: in-memory serialization to Python-native data structures.
+- Persistable: disk persistence with native HDF5 dataset support.
+
+The design emphasizes explicit schemas, numerical efficiency, forward
+compatibility, and minimal magic.
+
 Author: Rafael R. L. Benevides
 """
 
 from __future__ import annotations
 
-import weakref
-
 import numpy
 import pandas
 import h5py
 
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta
 from numbers import Number
 from pathlib import Path
 
 # ---------- ---------- ---------- ---------- ---------- ---------- typing
 from typing import TypeVar, Callable, Any, TypeAlias, Self, Type
 
-from astropy.io.fits import file
 from numpy.typing import NDArray
 
 
@@ -33,12 +44,56 @@ Parser: TypeAlias = Callable[[object, Any], T]
 
 
 class SerializableProperty:
+    """
+    Descriptor representing a serializable attribute.
+
+    SerializableProperty extends the built-in ``property`` concept with
+    features required for persistent object models, including default
+    values, validation, observation hooks, immutability constraints, and
+    copy semantics.
+
+    SerializableProperty instances are automatically discovered by
+    ``SerializableMetatype`` and define the serialization schema of a class.
+
+    Parameters
+    ----------
+    fget : callable, optional
+        Getter function with signature ``fget(instance) -> value``.
+    fset : callable, optional
+        Setter function with signature ``fset(instance, value)``.
+    fdel : callable, optional
+        Deleter function with signature ``fdel(instance)``.
+    default : object or callable, optional
+        Default value or default factory. If callable, must have signature
+        ``default(instance) -> value``.
+    parser : callable, optional
+        Value parser applied before assignment. Signature:
+        ``parser(instance, raw_value) -> parsed_value``.
+    observer : callable, optional
+        Observer callback executed after assignment. Signature:
+        ``observer(instance, old_value, new_value)``.
+    readonly : bool, default False
+        If True, the property cannot be assigned.
+    writeonce : bool, default False
+        If True, the property may only be assigned once to a non-None value.
+    copiable : bool, default True
+        If True, the property participates in copy and equality operations.
+    doc : str, optional
+        Docstring for the property. If omitted, the getter docstring is used.
+
+    Notes
+    -----
+    If the stored value is missing or None, the default is returned.
+    Explicit assignment of None is treated as "unset".
+
+    Setting both ``readonly`` and ``writeonce`` is not allowed.
+    """
 
     # ========== ========== ========== ========== ========== class attributes
     __slots__ = ('fget', 'fset', 'fdel',
                  '_default', '_parser', '_observer',
                  '_writeonce', '_copiable', '_readonly',
-                 'name', 'private_name', 'owner', '__doc__', '__weakref__')
+                 'name', 'private_name', 'owner', '__doc__')
 
     # ========== ========== ========== ========== ========== special methods
     def __init__(self,
@@ -88,7 +143,12 @@ class SerializableProperty:
             self.fset = lambda obj, value: setattr(obj, self.private_name, value)
 
     def __get__(self, instance: object|None, owner: type) -> T|Self:
-        """Get the property value."""
+        """
+        Return the property value.
+
+        If accessed from the class, returns the descriptor itself.
+        If the stored value is None or missing, the default is returned.
+        """
         if instance is None:
             # Accessing from class, return descriptor for introspection
             return self
@@ -112,7 +172,16 @@ class SerializableProperty:
         return value
 
     def __set__(self, instance: object, value: Any) -> None:
-        """Set the property value."""
+        """
+        Assign a value to the property.
+
+        The assignment process follows this order:
+        1. Enforce read-only or write-once constraints.
+        2. Apply default if value is None.
+        3. Apply parser if defined.
+        4. Assign the value.
+        5. Notify observer if defined.
+        """
         if self.fset is None:
             # No setter provided - property is read-only
             raise AttributeError(
@@ -151,7 +220,14 @@ class SerializableProperty:
             self._observer(instance, old_value, value)
 
     def __delete__(self, instance: object) -> None:
-        """Delete the property value."""
+        """
+        Delete the property value.
+
+        Raises
+        ------
+        AttributeError
+            If no deleter is defined.
+        """
         if self.fdel is None:
             raise AttributeError(f"can't delete attribute '{self.name}'")
 
@@ -159,7 +235,18 @@ class SerializableProperty:
 
     # ========== ========== Descriptor protocol methods to work like @property
     def getter(self, fget: Getter) -> Self:
-        """Set the getter function."""
+        """
+        Return a new SerializableProperty with a replaced getter.
+
+        Parameters
+        ----------
+        fget : callable
+            New getter function.
+
+        Returns
+        -------
+        SerializableProperty
+        """
         return type(self)(
             fget, self.fset, self.fdel,
             default=self._default,
@@ -172,7 +259,18 @@ class SerializableProperty:
         )
 
     def setter(self, fset: Setter) -> Self:
-        """Set the setter function."""
+        """
+        Return a new SerializableProperty with a replaced setter.
+
+        Parameters
+        ----------
+        fset : callable
+            New setter function.
+
+        Returns
+        -------
+        SerializableProperty
+        """
         return type(self)(
             self.fget, fset, self.fdel,
             default=self._default,
@@ -185,7 +283,18 @@ class SerializableProperty:
         )
 
     def deleter(self, fdel: Deleter) -> Self:
-        """Set the deleter function."""
+        """
+        Return a new SerializableProperty with a replaced deleter.
+
+        Parameters
+        ----------
+        fdel : callable
+            New deleter function.
+
+        Returns
+        -------
+        SerializableProperty
+        """
         return type(self)(
             self.fget, self.fset, fdel,
             default=self._default,
@@ -199,7 +308,18 @@ class SerializableProperty:
 
     # ---------- ---------- and more!!
     def default(self, func: Getter) -> Self:
-        """Set the default value."""
+        """
+        Return a new SerializableProperty with a replaced default factory.
+
+        Parameters
+        ----------
+        func : callable
+            Default factory with signature ``func(instance) -> value``.
+
+        Returns
+        -------
+        SerializableProperty
+        """
         return type(self)(
             self.fget, self.fset, self.fdel,
             default=func,
@@ -212,7 +332,18 @@ class SerializableProperty:
         )
 
     def parser(self, func: Parser) -> Self:
-        """Set the parser function."""
+        """
+        Return a new SerializableProperty with a replaced parser.
+
+        Parameters
+        ----------
+        func : callable
+            Parser function.
+
+        Returns
+        -------
+        SerializableProperty
+        """
         return type(self)(
             self.fget, self.fset, self.fdel,
             default=self._default,
@@ -225,7 +356,18 @@ class SerializableProperty:
         )
 
     def observer(self, func: Observer) -> Self:
-        """Set the observer function."""
+        """
+        Return a new SerializableProperty with a replaced observer.
+
+        Parameters
+        ----------
+        func : callable
+            Observer callback.
+
+        Returns
+        -------
+        SerializableProperty
+        """
         return type(self)(
             self.fget, self.fset, self.fdel,
             default=self._default,
@@ -239,17 +381,23 @@ class SerializableProperty:
 
     @property
     def readonly(self) -> bool:
-        """Check if property is read-only (no setter)."""
+        """
+        bool : Whether the property is read-only.
+        """
         return self._readonly
 
     @property
     def writeonce(self) -> bool:
-        """Check if property is write-once property."""
+        """
+        bool : Whether the property is write-once.
+        """
         return self._writeonce
 
     @property
     def copiable(self) -> bool:
-        """Check if property is copiable property."""
+        """
+        bool : Whether the property participates in copy operations.
+        """
         return self._copiable
 
 
@@ -258,7 +406,28 @@ def serializable_property(
         readonly: bool = False,
         writeonce: bool = False,
         copiable: bool = True) -> Callable[[Getter], SerializableProperty]:
+    """
+    Decorator that creates a SerializableProperty from a getter function.
 
+    This is a convenience wrapper for defining serializable attributes with
+    implicit storage and default behavior.
+
+    Parameters
+    ----------
+    default : object or callable, optional
+        Default value or default factory.
+    readonly : bool, default False
+        Whether the property is read-only.
+    writeonce : bool, default False
+        Whether the property is write-once.
+    copiable : bool, default True
+        Whether the property participates in copy operations.
+
+    Returns
+    -------
+    callable
+        Decorator returning a SerializableProperty.
+    """
     def decorator(getter: Getter) -> SerializableProperty:
         return SerializableProperty(
             fget=getter,
@@ -269,8 +438,6 @@ def serializable_property(
         )
 
     return decorator
-
-
 
 
 # ========== ========== ========== ========== ========== ==========
@@ -332,40 +499,29 @@ def check_types(obj: Any,
                 types: type | tuple[type],
                 can_be_none: bool = False,
                 raise_error: bool = True) -> bool:
-    """Checks if ``obj`` is instance of ``types``.
-
-    This is convenience function designed to facilitate/standardise the raising
-    of an error when the type of ``obj`` is unexpected.
+    """
+    Validate that an object is an instance of one or more expected types.
 
     Parameters
     ----------
-    obj : :py:class:`object`
-        Object whose type must be checked.
-
-    types :  :py:class:`type` | :py:class:`tuple` of :py:class:`types <type>`
-        Expected types of ``obj``.
-
-    can_be_none : :py:class:`bool`
-        Set this if :py:data:`None` is an acceptable value for ``obj``. If set
-        and ``obj is None``, :py:data:`True` is returned.
-
-    raise_error : :py:class:`bool`
-        Controls how the function behaves when ``obj`` is not an instance of
-        the given types. If :py:data:`True`, then :class:`TypeError` is raised.
-        Else, no error is raised.
+    obj : object
+        Object to validate.
+    types : type or tuple of type
+        Expected type or types.
+    can_be_none : bool, default False
+        Whether None is considered a valid value.
+    raise_error : bool, default True
+        Whether to raise TypeError on mismatch.
 
     Returns
     -------
-    out : :py:class:`bool`
-        :py:data:`True` if ``obj`` is an instance of one of the given
-        ``types``. :py:data:`False` otherwise.
+    bool
+        True if the object matches the expected types, False otherwise.
 
     Raises
     ------
-    :class:`DTypeError`
-        if ``obj`` is not an instance of one of the given ``types`` and
-        ``raise_error = True``
-
+    TypeError
+        If the object does not match the expected types and raise_error is True.
     """
 
     if can_be_none:
@@ -391,7 +547,14 @@ def check_types(obj: Any,
 
 
 class SerializableMetatype(ABCMeta):
+    """
+    Metaclass responsible for building the serialization registry.
 
+    This metaclass automatically registers Serializable subclasses,
+    collects SerializableProperty descriptors across the full MRO,
+    and maintains global registries for serializable classes,
+    primitive types, and dataset-backed types.
+    """
     # ========== ========== ========== ========== ========== class attributes
     ...
 
@@ -405,7 +568,7 @@ class SerializableMetatype(ABCMeta):
         cls = super().__new__(mcs, name, bases, namespace, **kwargs)
 
         # ---------- ---------- ---------- ---------- ---------- ----------
-        if name is 'Serializable':
+        if name == 'Serializable':
             cls._subclasses: dict[str, Type[Serializable]] = {}
             cls._primitive_types: set[type] = set()
             cls._dataset_types: dict[type|str, dict[str, Any]] = {}
@@ -414,7 +577,7 @@ class SerializableMetatype(ABCMeta):
             qualname: str = get_full_qualified_name(cls)
             Serializable._subclasses[qualname] = cls
 
-            cls._serializable_properties = weakref.WeakValueDictionary()
+            cls._serializable_properties = {}
 
             for base in cls.__mro__:
 
@@ -456,25 +619,70 @@ class SerializableMetatype(ABCMeta):
 
     # ========== ========== ========== ========== ========== public methods
     def register_primitive_type(cls, primitive_type: type) -> None:
-        """Register primitive type"""
+        """
+        Register a primitive type.
+
+        Primitive types are serialized verbatim without additional metadata.
+
+        Parameters
+        ----------
+        primitive_type : type
+            Type to register.
+
+        Raises
+        ------
+        TypeError
+            If the type is not eligible to be primitive.
+        """
         if issubclass(primitive_type, (list, dict, tuple, Serializable)):
             raise TypeError(f'Cannot register {primitive_type} as primitive type')
 
         Serializable._primitive_types.add(primitive_type)
 
     def remove_primitive_type(cls, primitive_type: type) -> None:
-        """Remove primitive type"""
+        """
+        Remove a previously registered primitive type.
+
+        Parameters
+        ----------
+        primitive_type : type
+            Type to remove.
+        """
         Serializable._primitive_types.discard(primitive_type)
 
     def is_primitive_type(cls, type_: type) -> bool:
-        """Test if type is primitive"""
+        """
+        Check whether a type is registered as primitive.
+
+        Parameters
+        ----------
+        type_ : type
+
+        Returns
+        -------
+        bool
+        """
         return type_ in Serializable._primitive_types
 
     def register_dataset_type(cls,
                               dataset_type: type,
                               disassemble: Callable[[Any], tuple[NDArray, dict]],
                               assemble: Callable[[NDArray, dict], Any]) -> None:
-        """Register dataset type"""
+        """
+        Register a dataset-backed type.
+
+        Dataset types behave as primitives during in-memory serialization,
+        but are stored as HDF5 datasets when persisted.
+
+        Parameters
+        ----------
+        dataset_type : type
+            Type to register.
+        disassemble : callable
+            Function with signature ``disassemble(obj) -> (ndarray, attrs)``.
+        assemble : callable
+            Function with signature ``assemble(ndarray, attrs) -> obj``.
+        """
         dataset_type_name = get_full_qualified_name(dataset_type)
 
         process = {
@@ -487,7 +695,13 @@ class SerializableMetatype(ABCMeta):
         Serializable.register_primitive_type(dataset_type)
 
     def remove_dataset_type(cls, dataset_type: type) -> None:
-        """Remove dataset type"""
+        """
+        Remove a registered dataset-backed type.
+
+        Parameters
+        ----------
+        dataset_type : type
+        """
         Serializable.remove_primitive_type(dataset_type)
 
         if dataset_type in Serializable._dataset_types:
@@ -498,7 +712,17 @@ class SerializableMetatype(ABCMeta):
             Serializable._dataset_types.pop(dataset_type_name)
 
     def is_dataset_type(cls, type_: type) -> bool:
-        """Test if type is dataset"""
+        """
+        Check whether a type is registered as dataset-backed.
+
+        Parameters
+        ----------
+        type_ : type
+
+        Returns
+        -------
+        bool
+        """
         return type_ in Serializable._dataset_types
 
     # ---------- ---------- ---------- ---------- ---------- properties
@@ -516,15 +740,35 @@ class SerializableMetatype(ABCMeta):
 
     @property
     def serializable_properties(cls) -> dict[str, SerializableProperty]:
+        """
+        dict[str, SerializableProperty]
+        """
         return {**cls._serializable_properties}
 
     @property
     def copiable_properties(cls) -> dict[str, SerializableProperty]:
+        """
+        dict[str, SerializableProperty]
+        """
         return {k: v for k, v in cls.serializable_properties.items() if v.copiable}
 
 
 class Serializable(metaclass=SerializableMetatype):
+    """
+    Base class for structured serialization.
 
+    Serializable objects can be converted to and from Python-native
+    data structures composed of dictionaries, lists, scalars, and
+    nested Serializable instances.
+
+    Construction
+    ------------
+    Serializable(**kwargs)
+        Initialize by assigning serializable properties.
+
+    Serializable(other)
+        Create a logical copy of another instance of the same class.
+    """
     # ========== ========== ========== ========== ========== class attributes
     ...
 
@@ -595,7 +839,26 @@ class Serializable(metaclass=SerializableMetatype):
     # ========== ========== ========== ========== ========== public methods
     @staticmethod
     def serialize(obj: Any, is_copy: bool = False) -> Any:
+        """
+        Serialize an object into Python-native data structures.
 
+        Parameters
+        ----------
+        obj : object
+            Object to serialize.
+        is_copy : bool, default False
+            Whether copy semantics should be applied.
+
+        Returns
+        -------
+        object
+            Serialized representation.
+
+        Raises
+        ------
+        TypeError
+            If no serialization method exists for the object type.
+        """
         if obj is None:
             return None
 
@@ -627,9 +890,26 @@ class Serializable(metaclass=SerializableMetatype):
 
     @staticmethod
     def deserialize(data: Any) -> Any:
+        """
+        Deserialize data into a Python object.
 
+        Parameters
+        ----------
+        data : object
+            Serialized data.
+
+        Returns
+        -------
+        object
+            Reconstructed object.
+
+        Raises
+        ------
+        TypeError
+            If deserialization is not possible.
+        """
         if data is None:
-            return
+            return None
 
         if isinstance(data, (tuple, list)):
             return [Serializable.deserialize(d) for d in data]
@@ -667,7 +947,13 @@ class Serializable(metaclass=SerializableMetatype):
         return data
 
     def copy(self) -> Serializable:
-        """TODO"""
+        """
+        Create a logical copy of the object.
+
+        Returns
+        -------
+        Serializable
+        """
         return type(self)(self)
 
     # ---------- ---------- ---------- ---------- ---------- properties
@@ -726,13 +1012,23 @@ Serializable.register_dataset_type(pandas.DatetimeIndex,
 
 # ========== ========== ========== ========== ========== ==========
 class Persistable(Serializable):
-    """Base class for serializable objects that can be persisted to disk."""
+    """
+    Serializable object that can be persisted to disk using HDF5.
+
+    Persistable extends Serializable with structured file I/O,
+    dataset-backed storage, and lazy dataset access.
+    """
 
     # ========== ========== ========== ========== ========== class attributes
     extension: str = '.hdf5'
 
     class ProxyDataset:
-        # TODO: this class should extend Representable for useful info in console
+        """
+        Lazy wrapper around an HDF5 dataset.
+
+        ProxyDataset defers reconstruction until data is accessed and
+        exposes a NumPy-like interface for reading and writing.
+        """
 
         def __init__(self, dataset: h5py.Dataset) -> None:
             self._dataset = dataset
@@ -740,13 +1036,31 @@ class Persistable(Serializable):
             self._dataset_type_name = self._attrs.pop('__dataset_type__')
 
         def __getitem__(self, item) -> Any:
+            """
+            Retrieve one or more elements from the dataset.
+
+            Parameters
+            ----------
+            item : slice or int
+
+            Returns
+            -------
+            object
+            """
             assemble = Serializable._dataset_types[self._dataset_type_name]['assemble']
             array = self._dataset[item]
 
             return assemble(array, self.attrs)
 
         def __setitem__(self, key, value) -> None:
+            """
+            Assign value(s) to the dataset, resizing if necessary.
 
+            Parameters
+            ----------
+            key : slice or int
+            value : object
+            """
             # this code block is meant to test if key is inside the dataset limits,
             # otherwise resizing it. This is actually pretty experimental, but passed
             # in the proposed tests
@@ -765,7 +1079,13 @@ class Persistable(Serializable):
             self._dataset[key] = arr
 
         def append(self, value: Any) -> None:
+            """
+            Append data to the dataset along axis 0.
 
+            Parameters
+            ----------
+            value : object
+            """
             disassemble = Serializable._dataset_types[self._dataset_type_name]['disassemble']
             arr, attrs = disassemble(value)
             assert attrs == self.attrs
@@ -960,7 +1280,18 @@ class Persistable(Serializable):
              path: Path | str,
              overwrite: bool = True,
              use_default_extension: bool = True) -> None:
+        """
+        Serialize and save the object to disk.
 
+        Parameters
+        ----------
+        path : str or Path
+            Output path.
+        overwrite : bool, default True
+            Whether to overwrite an existing file.
+        use_default_extension : bool, default True
+            Whether to enforce the default file extension.
+        """
         # ---------- ---------- resolve path
         path = Path(path)
 
@@ -976,14 +1307,26 @@ class Persistable(Serializable):
 
     @classmethod
     def load(cls, path: Path|str) -> Persistable:
+        """
+        Load and deserialize an object from disk.
 
+        Parameters
+        ----------
+        path : str or Path
+
+        Returns
+        -------
+        Persistable
+        """
         data = cls.load_serialized_data(path)
         return Serializable.deserialize(data)
 
     # ---------- ---------- ---------- ---------- ---------- properties
     ...
 
+
 Serializable.register_primitive_type(Persistable.ProxyDataset)
+
 
 __all__ = [
     'SerializableProperty',
