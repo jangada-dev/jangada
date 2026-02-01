@@ -1,6 +1,100 @@
 #  -*- coding: utf-8 -*-
 """
-Author: Rafael R. L. Benevides
+Mixins providing orthogonal identity, metadata, and state capabilities.
+
+This module defines a collection of lightweight mixin classes that add
+well-scoped, reusable properties to domain objects. Each mixin introduces
+exactly one conceptual capability (identity, naming, tagging, description,
+color, activation state) and is designed to compose cleanly with others.
+
+The mixins in this module are intentionally:
+
+- Orthogonal: each mixin addresses a single concern.
+- Declarative: behavior is expressed via ``SerializableProperty`` descriptors.
+- Non-invasive: no assumptions are made about object lifecycle, ownership,
+  persistence strategy, or container semantics.
+- Composable: mixins may be combined freely in user-defined classes.
+
+Design philosophy
+-----------------
+These mixins are *capabilities*, not full abstractions. They do not enforce
+global policies such as uniqueness, registration, or indexing. Instead,
+they expose normalized, well-defined attributes that higher-level components
+may interpret and organize as needed.
+
+For example:
+
+- ``Taggable`` provides a validated symbolic tag, but does not manage lookup.
+- ``Identifiable`` provides a globally unique ID, but does not define equality
+  semantics beyond hashing.
+- ``Colorable`` provides a canonical color representation, but does not impose
+  any rendering or styling logic.
+
+This separation keeps the mixins predictable and avoids hidden coupling.
+
+SerializableProperty integration
+--------------------------------
+All properties in this module are implemented using
+:class:`jangada.serialization.SerializableProperty`. This ensures:
+
+- Consistent normalization and validation on assignment.
+- Explicit control over copy semantics (e.g. IDs are not copied).
+- First-class support for serialization and persistence.
+
+Each property documents its own validation rules and guarantees.
+
+Overview of provided mixins
+---------------------------
+
+Identifiable
+    Adds a globally unique, write-once UUID v4 identifier (``id``). Instances
+    are tracked in a weak-reference registry for lookup by ID.
+
+Taggable
+    Adds a symbolic tag (``tag``) validated as a Python identifier, suitable
+    for attribute-based access in registries or namespaces.
+
+Nameable
+    Adds a short, human-readable name (``name``) intended for display and
+    labeling purposes.
+
+Describable
+    Adds a free-form description text (``description``) for extended context
+    or documentation.
+
+Colorable
+    Adds a color attribute (``color``) stored as a canonical HTML hex string
+    (``#RRGGBB``), suitable for visualization and UI styling.
+
+Activatable
+    Adds a boolean activation flag (``active``) indicating whether an object
+    is enabled or in effect.
+
+Composition
+-----------
+These mixins are designed to be freely combined:
+
+>>> class Asset(Identifiable, Taggable, Nameable, Colorable, Activatable):
+...     pass
+
+No ordering constraints are imposed, and no mixin assumes the presence of
+another unless explicitly documented.
+
+Notes
+-----
+- None of the mixins are abstract, but they are primarily intended to be used
+  via inheritance rather than instantiated directly.
+- Validation logic is intentionally conservative and explicit; higher-level
+  policies (e.g. uniqueness of tags, strict boolean parsing) should be enforced
+  by containers or application logic.
+
+See Also
+--------
+jangada.serialization.SerializableProperty
+    Descriptor used to implement all mixin properties.
+
+TagNamespace
+    Namespace-like container that can expose Taggable objects by their tags.
 """
 
 from __future__ import annotations
