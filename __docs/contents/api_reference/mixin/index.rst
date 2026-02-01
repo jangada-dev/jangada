@@ -13,6 +13,8 @@ Mixins (``jangada.mixin``)
     :hidden:
 
     Identifiable
+    Taggable
+    TagNamespace
 
 
 ========
@@ -22,3 +24,5 @@ Entities
 .. autosummary::
 
     Identifiable
+    Taggable
+    TagNamespace

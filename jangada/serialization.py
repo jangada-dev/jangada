@@ -270,7 +270,7 @@ class SerializableProperty:
             else:
                 value = self._default
 
-            if self.fset is not None:
+            if value is not None and self.fset is not None:
                 self.fset(instance, value)
 
                 if self._observer is not None:
