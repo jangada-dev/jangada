@@ -1,8 +1,8 @@
 .. _api-serialization:
 
-###################################################
-Serialization Interface (``jangada.serialization``)
-###################################################
+#########################################
+Serialization (``jangada.serialization``)
+#########################################
 
 .. automodule:: jangada.serialization
 

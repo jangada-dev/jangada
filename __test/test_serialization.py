@@ -59,6 +59,8 @@ class TestSerializableProperty:
 
         obj.attr = 10
 
+        assert obj.attr == 10
+
         try:
             obj.attr = 20
 

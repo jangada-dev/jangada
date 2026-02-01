@@ -267,9 +267,14 @@ class SerializableProperty:
 
             if callable(self._default):
                 value = self._default(instance)
-
             else:
                 value = self._default
+
+            if self.fset is not None:
+                self.fset(instance, value)
+
+                if self._observer is not None:
+                    self._observer(instance, None, value)
 
         return value
 

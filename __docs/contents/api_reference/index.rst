@@ -10,5 +10,6 @@ API Reference
     :maxdepth: 1
 
     serialization/index
+    mixin/index
 
 
