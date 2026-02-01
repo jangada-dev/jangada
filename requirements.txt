@@ -27,7 +27,7 @@ pandas                  # https://pandas.pydata.org/docs/
 h5py                    # https://docs.h5py.org/en/stable/
 
 # -------------------------------------------------------------------- plotting
-#matplotlib              # https://matplotlib.org/stable/
+matplotlib              # https://matplotlib.org/stable/
 #PySide2                # https://doc.qt.io/qt-5.15/classes.html
 #PySide2-stubs          # https://github.com/python-qt-tools/PySide2-stubs
 #PyQt5                   # https://doc.qt.io/qt-5.15/classes.html

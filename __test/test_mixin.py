@@ -5,7 +5,7 @@ Author: Rafael R. L. Benevides
 
 import uuid
 
-from jangada.mixin import Identifiable, Taggable, TagNamespace
+from jangada.mixin import Identifiable, Taggable, TagNamespace, Colorable
 
 
 class TestIdentifiable:
@@ -84,4 +84,17 @@ class TestTaggable:
         assert namespace.new_obj2_tag is obj2
 
 
+class TestColorable:
 
+    def test_color(self):
+        print()
+        from matplotlib.colors import to_hex
+
+        obj = Colorable()
+        assert obj.color == "#1F77B4"
+
+        obj.color = "C2"
+        assert obj.color == to_hex("C2").upper()
+
+        obj.color = None
+        assert obj.color == "#1F77B4"

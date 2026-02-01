@@ -9,6 +9,8 @@ import keyword
 import weakref
 import uuid
 
+from matplotlib.colors import to_hex
+
 from jangada.serialization import SerializableProperty
 
 # ---------- ---------- ---------- ---------- ---------- ---------- typing
@@ -656,6 +658,332 @@ class TagNamespace:
 
 # ========== ========== ========== ========== ========== Nameable
 class Nameable:
+    """
+    Mixin class providing a human-readable name.
 
-    name = SerializableProperty()
+    ``Nameable`` adds a single serializable attribute, ``name``, intended for
+    user-facing labels (e.g., display names in UIs, reports, logs, or plots).
+
+    This mixin does not impose uniqueness or identification semantics; it is
+    strictly descriptive. If you need stable identity, pair with an
+    identification mixin (e.g., ``Identifiable``) or a separate registry.
+
+    Attributes
+    ----------
+    name : str or None
+        Optional human-readable name.
+
+    Normalization rules
+    -------------------
+    - ``None`` is accepted and represents an unnamed object.
+    - Non-None values are coerced to ``str`` and stripped of leading/trailing
+      whitespace.
+
+    Notes
+    -----
+    Whitespace-only and the empty string will be treated as ``None``.
+
+    See Also
+    --------
+    Describable
+        Adds a longer free-form description field.
+    Taggable
+        Adds a symbolic tag intended for attribute-like lookup in registries.
+    """
+
+    name = SerializableProperty(doc="""
+        Human-readable name of the object.
+
+        The ``name`` field is intended for display purposes (UI labels, report
+        headings, plot legends). It should be meaningful to humans but does not
+        need to be globally unique.
+
+        Parameters
+        ----------
+        value : object or None
+            Proposed name value. If not None, it is converted to ``str``.
+
+        Returns
+        -------
+        str or None
+            Normalized name (stripped) or None if unset.
+
+        Normalization Rules
+        -------------------
+        - ``None`` is accepted and preserved.
+        - Otherwise, the value is coerced to ``str`` and stripped.
+
+        Notes
+        -----
+        The normalization is intentionally minimal: it does not change casing,
+        does not collapse internal whitespace, and does not enforce any length
+        constraints. Those policies, if needed, should be implemented at a
+        higher level.
+        """)
+
+    @name.parser
+    def name(self, value: Any) -> str|None:
+        if value is None:
+            return None
+
+        value = str(value).strip()
+
+        return value if value else None
+
+
+# ========== ========== ========== ========== ========== Describable
+class Describable:
+    """
+    Mixin class providing a free-form description.
+
+    ``Describable`` adds a single serializable attribute, ``description``,
+    intended for longer text compared to ``Nameable.name``. Typical uses
+    include:
+
+    - documentation strings attached to objects,
+    - operator notes,
+    - provenance / context text,
+    - UI tooltips or detail panels.
+
+    Attributes
+    ----------
+    description : str or None
+        Optional free-form description text.
+
+    Normalization rules
+    -------------------
+    - ``None`` is accepted and represents an absent description.
+    - Non-None values are coerced to ``str`` and stripped of leading/trailing
+      whitespace.
+
+    Notes
+    -----
+    - This mixin intentionally does not impose formatting rules (Markdown,
+      reStructuredText, etc.). Treat it as plain text unless your application
+      layer specifies otherwise.
+    - Whitespace-only and the empty string will be treated as ``None``.
+
+    See Also
+    --------
+    Nameable
+        Adds a shorter human-readable label.
+    """
+
+    description = SerializableProperty(doc="""
+        Free-form description text.
+
+        The ``description`` field is meant for longer, explanatory content that
+        helps users understand the object beyond its name or identifiers.
+
+        Parameters
+        ----------
+        value : object or None
+            Proposed description. If not None, it is converted to ``str``.
+
+        Returns
+        -------
+        str or None
+            Normalized description (stripped) or None if unset.
+
+        Normalization Rules
+        -------------------
+        - ``None`` is accepted and preserved.
+        - Otherwise, the value is coerced to ``str`` and stripped of leading and
+          trailing whitespace.
+
+        Notes
+        -----
+        The normalization is intentionally minimal. If your application requires
+        additional constraints (length limits, formatting, sanitization), apply
+        them at the application layer.
+        """)
+
+    @description.parser
+    def description(self, value: Any) -> str|None:
+        if value is None:
+            return None
+
+        value = str(value).strip()
+
+        return value if value else None
+
+
+# ========== ========== ========== ========== ========== Colorable
+class Colorable:
+    """
+    Mixin class providing a color attribute.
+
+    ``Colorable`` adds a single serializable attribute, ``color``, representing
+    a color encoded as an HTML hexadecimal string (``#RRGGBB``).
+
+    The color is intended primarily for visualization and UI purposes
+    (plots, diagrams, dashboards, styling), where a compact and portable
+    representation is desirable.
+
+    Attributes
+    ----------
+    color : str
+        Color encoded as an HTML hex string (``#RRGGBB``).
+
+    Default value
+    -------------
+    The default color is ``"#1F77B4"``, matching the first color of Matplotlib’s
+    default color cycle. This provides consistent and visually pleasing behavior
+    out of the box.
+
+    Normalization rules
+    -------------------
+    - The value is normalized via the ``to_hex`` utility function.
+    - The resulting hexadecimal string is uppercased before storage.
+
+    Notes
+    -----
+    - ``None`` is not accepted as a valid value for ``color``.
+    - Validation and conversion logic are delegated to ``to_hex``.
+    - The stored value is always canonical (uppercase ``#RRGGBB``).
+
+    See Also
+    --------
+    Nameable
+        Provides a human-readable name.
+    Describable
+        Provides a free-form description.
+    """
+    color = SerializableProperty(default='#1F77B4', doc="""
+        HTML hex color associated with the object.
+
+        The ``color`` property stores a color encoded as an HTML hexadecimal
+        string of the form ``#RRGGBB``. It is primarily intended for
+        visualization and UI styling.
+
+        Parameters
+        ----------
+        value : object
+            Proposed color value. The value is passed to the ``to_hex`` utility
+            for validation and conversion.
+
+        Returns
+        -------
+        str
+            Normalized color string in uppercase ``#RRGGBB`` format.
+
+        Raises
+        ------
+        ValueError
+            If the value cannot be converted to a valid HTML hex color.
+
+        Notes
+        -----
+        - The default value is ``"#1F77B4"``.
+        - The normalization step ensures consistent casing and formatting,
+          which is important for comparisons, hashing, and serialization.
+        - Supported input formats depend on the implementation of ``to_hex``
+          (e.g. named colors, RGB tuples, hex strings).
+
+        Examples
+        --------
+        >>> obj = Colorable()
+        >>> obj.color
+        '#1F77B4'
+
+        >>> obj.color = "#ff0000"
+        >>> obj.color
+        '#FF0000'
+        """)
+
+    @color.parser
+    def color(self, value: Any) -> str:
+        return to_hex(value).upper()
+
+
+# ========== ========== ========== ========== ========== Activatable
+class Activatable:
+    """
+    Mixin class providing an "active" boolean flag.
+
+    ``Activatable`` adds a single serializable attribute, ``active``, intended
+    to represent whether an object is enabled, selected, currently in effect,
+    or otherwise considered active by application logic.
+
+    This mixin intentionally does not impose any semantics beyond storing a
+    boolean value. Interpretation is left to the domain layer (e.g., filtering
+    only active assets, rendering inactive objects with lower opacity, etc.).
+
+    Attributes
+    ----------
+    active : bool
+        Whether the object is active. Defaults to True.
+
+    Default behavior
+    ----------------
+    The default is ``True`` so that objects are "active by default" unless
+    explicitly disabled.
+
+    Parsing rules
+    -------------
+    The value is normalized using ``bool(value)``.
+
+    Important: ``bool(...)`` follows Python truthiness rules, which means:
+
+    - ``bool(False)`` is False
+    - ``bool(0)`` is False
+    - ``bool(1)`` is True
+    - ``bool("")`` is False
+    - ``bool("false")`` is True  (non-empty strings are truthy)
+
+    If you require strict parsing of strings such as "true"/"false", implement
+    a stricter parser (e.g. mapping known strings) instead of using ``bool``.
+
+    See Also
+    --------
+    Taggable
+        Adds a symbolic tag used for external references.
+    Nameable
+        Adds a human-readable name.
+    """
+
+    active = SerializableProperty(default=True, doc="""
+        Whether the object is active (enabled).
+
+        The ``active`` property is a boolean flag intended to represent whether
+        an object should be considered enabled or in effect by application
+        logic.
+
+        Parameters
+        ----------
+        value : object
+            Proposed value. Normalized using ``bool(value)``.
+
+        Returns
+        -------
+        bool
+            Normalized boolean value.
+
+        Notes
+        -----
+        This property uses Python truthiness rules via ``bool(value)``. Be aware
+        that non-empty strings are truthy, so values such as ``"false"``,
+        ``"0"``, and ``"no"`` evaluate to True.
+
+        If your API expects strict boolean parsing, consider implementing a
+        stricter parser at the mixin level or in the caller.
+
+        Examples
+        --------
+        >>> obj = Activatable()
+        >>> obj.active
+        True
+
+        >>> obj.active = 0
+        >>> obj.active
+        False
+
+        >>> obj.active = "false"
+        >>> obj.active
+        True
+        """)
+
+    @active.parser
+    def active(self, value: bool) -> bool:
+        return bool(value)
 

@@ -15,6 +15,11 @@ Mixins (``jangada.mixin``)
     Identifiable
     Taggable
     TagNamespace
+    Nameable
+    Describable
+    Colorable
+    Activatable
+
 
 
 ========
@@ -26,3 +31,7 @@ Entities
     Identifiable
     Taggable
     TagNamespace
+    Nameable
+    Describable
+    Colorable
+    Activatable
