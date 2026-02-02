@@ -216,12 +216,13 @@ class SerializableProperty:
         It also generates default getter/setter callables when not explicitly
         provided.
         """
+
         self.name: str = name
         self.owner: type = owner
         self.private_name: str = f"_serializable_property__{name}"
 
         if self.fget is None:
-            self.fget = lambda obj: getattr(obj, self.private_name)
+            self.fget = lambda obj: obj.__getattribute__(self.private_name)
 
         if self.fset is None and not self._readonly:
             self.fset = lambda obj, value: setattr(obj, self.private_name, value)
@@ -1183,7 +1184,7 @@ class Serializable(metaclass=SerializableMetatype):
         if obj is None:
             return None
 
-        if isinstance(obj, (tuple, list)):
+        if isinstance(obj, (tuple, list, set)):
             return [Serializable.serialize(o, is_copy=is_copy) for o in obj]
 
         if isinstance(obj, dict):
@@ -1244,7 +1245,7 @@ class Serializable(metaclass=SerializableMetatype):
         if data is None:
             return None
 
-        if isinstance(data, (tuple, list)):
+        if isinstance(data, (tuple, list, set)):
             return [Serializable.deserialize(d) for d in data]
 
         if isinstance(data, dict) and '__class__' not in data:
@@ -1931,9 +1932,13 @@ class Persistable(Serializable):
 Serializable.register_primitive_type(Persistable.ProxyDataset)
 
 
+load = Persistable.load
+
+
 __all__ = [
     'SerializableProperty',
     'serializable_property',
     'Serializable',
-    'Persistable'
+    'Persistable',
+    'load',
 ]

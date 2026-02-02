@@ -1081,3 +1081,12 @@ class Activatable:
     def active(self, value: bool) -> bool:
         return bool(value)
 
+
+__all__ = [
+    'Identifiable',
+    'Taggable',
+    'Nameable',
+    'Describable',
+    'Activatable',
+    'Colorable',
+]
