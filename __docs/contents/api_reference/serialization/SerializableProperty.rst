@@ -19,18 +19,19 @@ Descriptor Interface
    SerializableProperty.__set__
    SerializableProperty.__delete__
 
-Property Protocol
-=================
+
+Configuration Helpers
+=====================
 
 .. autosummary::
    :toctree: generated/
 
-   SerializableProperty.getter
-   SerializableProperty.setter
    SerializableProperty.deleter
    SerializableProperty.default
    SerializableProperty.parser
-   SerializableProperty.observer
+   SerializableProperty.add_observer
+   SerializableProperty.remove_observer
+
 
 Properties
 ==========
@@ -41,11 +42,3 @@ Properties
    SerializableProperty.readonly
    SerializableProperty.writeonce
    SerializableProperty.copiable
-
-Decorator
-=========
-
-.. autosummary::
-   :toctree: generated/
-
-   serializable_property

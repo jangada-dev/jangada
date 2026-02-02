@@ -275,7 +275,7 @@ class Identifiable:
             msg = f"Invalid UUID for id: {value!r}. Must be a valid UUID v4."
             raise ValueError(msg) from error
 
-    @id.observer
+    @id.add_observer
     def id(self, old_value: str, new_value: str) -> None:
         Identifiable._instances[new_value] = self
 
@@ -389,7 +389,6 @@ class Identifiable:
         id : The unique identifier property
         """
         return Identifiable._instances.get(id_)
-
 
 # ========== ========== ========== ========== ========== Taggable
 class Taggable:

@@ -9,7 +9,7 @@ import numpy, pandas
 from pathlib import Path
 from time import sleep
 
-from jangada.serialization import Serializable, serializable_property, SerializableProperty
+from jangada.serialization import Serializable, SerializableProperty
 from jangada.serialization import Persistable
 
 from typing import Any
@@ -21,10 +21,7 @@ class TestSerializableProperty:
         print()
 
         class ReadOnlyExample:
-
-            @serializable_property(readonly=True, default="default")
-            def attr(self) -> str:
-                return "attr"
+            attr = SerializableProperty(readonly=True, default="default")
 
         obj = ReadOnlyExample()
 
@@ -44,16 +41,8 @@ class TestSerializableProperty:
 
         class WriteOnceExample:
 
-            @serializable_property(writeonce=True)
-            def attr(self) -> str | None:
-                try:
-                    return self._attr
-                except AttributeError:
-                    ...
+            attr = SerializableProperty(writeonce=True, default="default")
 
-            @attr.setter
-            def attr(self, value: Any) -> None:
-                self._attr = value
 
         obj = WriteOnceExample()
 
@@ -71,7 +60,6 @@ class TestSerializableProperty:
             raise AttributeError()
 
     def test_integration_1(self) -> None:
-        print()
 
         import uuid
 
@@ -139,9 +127,13 @@ class TestSerializableProperty:
             def x(self, value: Any) -> float:
                 return float(value) if value is not None else None
 
-            @x.observer
+            @x.add_observer
             def x(self, old_value: float, new_value: float) -> None:
                 print(f"x changed from {old_value} to {new_value}")
+
+            @x.add_observer
+            def x(self, old_value: float, new_value: float) -> None:
+                print(f"sanity check")
 
         p = Point()
 
