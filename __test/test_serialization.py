@@ -567,3 +567,82 @@ class TestPersistable:
         print(data.name)
         print(data.antenna1.frequency)
 
+
+# ========== ========== ========== ========== ========== ==========
+class TestSerializableProperty:
+
+    def test_set_name_binds_descriptor_metadata(self):
+        # What we are testing:
+        # - When Python creates the class, it calls __set_name__ on descriptors.
+        # - SerializableProperty should record:
+        #   * public name (e.g. "x")
+        #   * owning class (owner)
+        #   * private storage name (private_name)
+        class A:
+            x = SerializableProperty()
+
+        assert A.x.name == "x"
+        assert A.x.owner is A
+        assert A.x.private_name == "_serializable_property__x"
+
+        class B(Serializable):
+            x = SerializableProperty()
+
+        assert 'x' in B.serializable_properties
+        assert B.x is B.serializable_properties['x']
+
+    def test_default_materializes_on_first_read_mutable_property(self):
+        # What we are testing:
+        # - If the backing attribute is missing, __get__ should materialize a default.
+        # - In mutable mode (readonly=False), __get__ delegates to __set__(..., None)
+        #   which applies default expansion and stores it.
+        class A:
+            x = SerializableProperty()
+
+            @x.default
+            def x(self):
+                return 42
+
+        a = A()
+        # backing attribute should not exist yet
+        assert not hasattr(a, "_serializable_property__x")
+
+        # First access should materialize the default and store it
+        assert a.x == 42
+        assert hasattr(a, "_serializable_property__x")
+        assert getattr(a, "_serializable_property__x") == 42
+
+        class B(Serializable):
+            x = SerializableProperty()
+
+            @x.default
+            def x(self):
+                return 42
+
+        b = B()
+
+        assert hasattr(b, "_serializable_property__x")
+        assert getattr(b, "_serializable_property__x") == 42
+
+    def test_default_materializes_on_first_read_readonly_property_without_observers(self):
+        # What we are testing:
+        # - If readonly=True, __get__ materializes default directly (without __set__)
+        # - Observers should NOT be called during this read-materialization (per docs).
+        calls: list[tuple[object, object, object]] = []
+
+        def obs(obj, old, new):
+            calls.append((obj, old, new))
+
+        class A(Serializable):
+            x = SerializableProperty(readonly=True)
+
+            @x.default
+            def x(self):
+                return 7
+
+        # Add observer explicitly (even though readonly); we want to ensure read does NOT trigger it.
+        A.serializable_properties["x"].add_observer(obs)
+
+        a = A()
+        assert a.x == 7
+        assert calls == []  # observers must not run on readonly default materialization

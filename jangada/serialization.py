@@ -269,6 +269,7 @@ class SerializableProperty:
         This design ensures consistent behavior between “first read” and
         “explicit assignment of None” for mutable properties.
         """
+
         if instance is None:
             # Accessing from class, return descriptor for introspection
             return self

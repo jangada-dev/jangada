@@ -19,6 +19,8 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
     extension = '.sys'
 
     # ========== ========== ========== ========== serializable properties
+
+    # ---------- ---------- ---------- ---------- subsystems
     subsystems = SerializableProperty()
 
     @subsystems.default
@@ -64,6 +66,7 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
 
         return _subsystems
 
+    # ---------- ---------- ---------- ---------- supersystem_id
     supersystem_id = SerializableProperty()
 
     @supersystem_id.parser
