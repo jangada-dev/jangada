@@ -193,7 +193,7 @@ class SerializableProperty:
 
         self._default: T | Getter | None = default
         self._parser: Parser | None = parser
-        self._observers: list[Observer] = [] if observers is None else observers
+        self._observers: set[Observer] = set() if observers is None else observers
 
         self._readonly: bool = readonly
         self._writeonce: bool = writeonce
@@ -552,7 +552,7 @@ class SerializableProperty:
 
             MyClass.x.add_observer(on_change)
         """
-        self._observers.append(func)
+        self._observers.add(func)
         return self
 
     def remove_observer(self, func: Observer) -> Self:
@@ -1096,6 +1096,9 @@ class Serializable(metaclass=SerializableMetatype):
             If ``other`` is not the same concrete type as ``self``.
         """
         if type(other) is not type(self):
+            return False
+
+            # I no longer think this behavior should raise an error
             error = f"Comparison must be taken between the same type: " \
                     f"{type(other).__name__} is not {type(self).__name__}"
 
@@ -1106,8 +1109,12 @@ class Serializable(metaclass=SerializableMetatype):
             other_value = getattr(other, key)
             self_value = getattr(self, key)
 
-            if not numpy.all(other_value == self_value):
-                return False
+            if isinstance(other_value, Serializable) and isinstance(self_value, Serializable):
+                if not Serializable.__eq__(other_value, self_value):
+                    return False
+            else:
+                if not numpy.all(other_value == self_value):
+                    return False
 
         return True
 

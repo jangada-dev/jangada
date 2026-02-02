@@ -4,6 +4,7 @@
 __refs
 
 __test/*.dat
+__test/*.sys
 
 # docs
 __docs/_build/
