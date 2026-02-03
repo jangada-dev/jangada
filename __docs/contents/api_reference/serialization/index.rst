@@ -12,6 +12,8 @@ Serialization (``jangada.serialization``)
 .. toctree::
     :hidden:
 
+    serialization_index
+
     SerializableProperty
     Serializable
     Persistable

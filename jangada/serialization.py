@@ -1006,27 +1006,37 @@ class SerializableProperty:
 # ========== ========== ========== ========== ========== ==========
 def get_full_qualified_name(cls: type) -> str:
     """
-    Return the fully qualified class name used by the serialization registry.
+    Get the fully qualified name of a class.
 
-    For built-in types (module is ``builtins``), returns ``cls.__qualname__``.
-    For user-defined types, returns ``"<module>.<qualname>"``.
+    Returns the module path and class name (e.g., 'mypackage.module.ClassName').
+    For builtin types without a module, returns just the qualified name.
 
     Parameters
     ----------
     cls : type
-        The class to identify.
+        The class for which to get the qualified name.
 
     Returns
     -------
     str
-        Fully qualified name suitable for registry keys.
+        The fully qualified name in the format 'module.qualname'.
+
+    Examples
+    --------
+    >>> class MyClass:
+    ...     pass
+    >>> get_full_qualified_name(MyClass)
+    '__main__.MyClass'
+
+    >>> get_full_qualified_name(int)
+    'int'
 
     Notes
     -----
-    This function uses ``__qualname__`` (not ``__name__``) so that nested class
-    names are preserved, e.g. ``Outer.Inner``. This helps prevent collisions and
-    supports reconstructing nested classes when importable.
+    This function is used internally to create unique identifiers for classes
+    in the serialization registry.
     """
+
     module = cls.__module__
 
     if module is None or module == 'builtins':
@@ -1040,43 +1050,50 @@ def check_types(obj: Any,
                 can_be_none: bool = False,
                 raise_error: bool = True) -> bool:
     """
-    Check whether an object is an instance of expected types.
-
-    This helper standardizes runtime type validation and error messages.
+    Check if an object is an instance of the specified type(s).
 
     Parameters
     ----------
-    obj : object
-        Value to test.
-    types : type or tuple of type
-        Expected type(s).
-    can_be_none : bool, default False
-        If True, ``None`` is accepted as valid and treated as matching.
-    raise_error : bool, default True
-        If True, raises TypeError when the check fails. If False, returns False
-        on mismatch.
+    obj : Any
+        The object to check.
+    types : type | tuple[type]
+        A single type or tuple of types to check against.
+    can_be_none : bool, optional
+        If True, None is considered a valid value. Default is False.
+    raise_error : bool, optional
+        If True, raise TypeError on type mismatch. If False, return False instead.
+        Default is True.
 
     Returns
     -------
     bool
-        True if obj is an instance of one of the expected types (or None, when
-        permitted), False otherwise.
+        True if the object matches the expected type(s), False otherwise
+        (only when raise_error=False).
 
     Raises
     ------
     TypeError
-        If ``raise_error`` is True and the check fails.
+        If the object does not match the expected type(s) and raise_error=True.
 
     Examples
     --------
-    >>> check_types(1, int)
+    >>> check_types(5, int)
     True
+
+    >>> check_types("hello", (int, str))
+    True
+
     >>> check_types(None, int, can_be_none=True)
     True
-    >>> check_types("x", int, raise_error=False)
-    False
-    """
 
+    >>> check_types(5, str, raise_error=False)
+    False
+
+    >>> check_types(5, str)  # doctest: +SKIP
+    Traceback (most recent call last):
+        ...
+    TypeError: Expected instance of one of the following classes: str. Given int instead
+    """
     if can_be_none:
         if isinstance(types, tuple):
             types = (*types, None.__class__)
@@ -1101,33 +1118,78 @@ def check_types(obj: Any,
 
 class SerializableMetatype(ABCMeta):
     """
-    Metaclass implementing the global serialization registry.
+    Metaclass for automatic registration and introspection of Serializable classes.
 
-    Any subclass of ``Serializable`` is automatically registered by fully
-    qualified name. Additionally, this metaclass:
+    This metaclass provides automatic registration of all Serializable subclasses,
+    discovery of SerializableProperty descriptors, and management of type registries
+    for serialization support.
 
-    - Collects ``SerializableProperty`` descriptors from the full MRO into a
-      per-class mapping (``_serializable_properties``).
-    - Maintains global registries on the ``Serializable`` root class:
+    Features
+    --------
+    - **Automatic registration**: All subclasses are registered by qualified name
+    - **Property discovery**: Automatically collects SerializableProperty descriptors
+    - **Type registries**: Manages primitive types and dataset types
+    - **Subscript access**: Access registered classes via Serializable[name]
+    - **Contains protocol**: Check class registration via 'name in Serializable'
 
-      * ``_subclasses``: mapping from fully qualified name to class
-      * ``_primitive_types``: set of types allowed as raw serialized values
-      * ``_dataset_types``: mapping from dataset type and dataset type name
-        to the disassemble/assemble process
+    Class Attributes (on Serializable base)
+    ----------------------------------------
+    _subclasses : dict[str, Type[Serializable]]
+        Registry of all Serializable subclasses by qualified name.
+    _primitive_types : set[type]
+        Registry of types that can be serialized as-is.
+    _dataset_types : dict[type | str, dict[str, Any]]
+        Registry of types requiring special disassemble/assemble handling.
+
+    Instance Attributes (on subclasses)
+    -----------------------------------
+    _serializable_properties : dict[str, SerializableProperty]
+        Collected SerializableProperty descriptors from the class and its bases.
+
+    Examples
+    --------
+    Creating a Serializable class automatically registers it:
+
+    >>> class MyClass(Serializable):
+    ...     value = SerializableProperty(default=0)
+    ...
+    >>> get_full_qualified_name(MyClass) in Serializable
+    True
+
+    Access classes by qualified name:
+
+    >>> qualname = get_full_qualified_name(MyClass)
+    >>> retrieved = Serializable[qualname]
+    >>> retrieved is MyClass
+    True
+
+    Property discovery happens automatically:
+
+    >>> 'value' in MyClass._serializable_properties
+    True
+
+    Register custom primitive types:
+
+    >>> class CustomType:
+    ...     pass
+    >>> Serializable.register_primitive_type(CustomType)
+    >>> Serializable.is_primitive_type(CustomType)
+    True
 
     Notes
     -----
-    Registry operations are global, not per-subclass: registering a primitive
-    or dataset type affects all serialization across the process.
+    This metaclass extends ABCMeta to allow Serializable classes to also be
+    abstract base classes if needed.
 
-    The metaclass supports:
-    - lookup: ``Serializable[qualname]``
-    - membership: ``qualname in Serializable`` or ``cls in Serializable``
+    The metaclass automatically:
+    1. Registers each subclass in the global registry
+    2. Walks the MRO to collect all SerializableProperty descriptors
+    3. Creates the _serializable_properties dict on each subclass
 
     See Also
     --------
-    Serializable
-    Persistable
+    Serializable : The base class using this metaclass
+    SerializableProperty : Property descriptor for serializable attributes
     """
     # ========== ========== ========== ========== ========== class attributes
     ...
@@ -1138,7 +1200,35 @@ class SerializableMetatype(ABCMeta):
                 bases: tuple[type, ...],
                 namespace: dict[str, Any],
                 **kwargs: Any) -> Type[Serializable]:
+        """
+        Create a new Serializable class with automatic registration.
 
+        This method is called when a new class is created. It handles:
+        - Creating class-level registries on the Serializable base class
+        - Registering subclasses in the global registry
+        - Collecting SerializableProperty descriptors from the MRO
+
+        Parameters
+        ----------
+        name : str
+            The name of the class being created.
+        bases : tuple[type, ...]
+            The base classes.
+        namespace : dict[str, Any]
+            The class namespace (attributes and methods).
+        **kwargs : Any
+            Additional keyword arguments passed to the metaclass.
+
+        Returns
+        -------
+        Type[Serializable]
+            The newly created class.
+
+        Notes
+        -----
+        For the Serializable base class itself, this creates the registries.
+        For subclasses, this registers them and collects their properties.
+        """
         cls = super().__new__(mcs, name, bases, namespace, **kwargs)
 
         # ---------- ---------- ---------- ---------- ---------- ----------
@@ -1168,22 +1258,38 @@ class SerializableMetatype(ABCMeta):
 
     def __getitem__(cls, qualname: str) -> Type[Serializable]:
         """
-        Resolve a registered Serializable subclass by fully qualified name.
+        Get a registered Serializable subclass by qualified name.
 
         Parameters
         ----------
         qualname : str
-            Fully qualified class name as returned by ``get_full_qualified_name``.
+            The fully qualified name of the class (e.g., 'module.ClassName').
 
         Returns
         -------
-        type
-            Registered subclass.
+        Type[Serializable]
+            The registered class.
 
         Raises
         ------
         KeyError
-            If the class is not registered.
+            If the qualified name is not registered or if called on a subclass
+            instead of the Serializable base.
+
+        Examples
+        --------
+        >>> class MyClass(Serializable):
+        ...     pass
+        >>> qualname = get_full_qualified_name(MyClass)
+        >>> retrieved = Serializable[qualname]
+        >>> retrieved is MyClass
+        True
+
+        Notes
+        -----
+        This method only works on the Serializable base class itself, not on
+        subclasses. Attempting to use subscript notation on a subclass will
+        raise a KeyError.
         """
         if cls is Serializable:
             return Serializable._subclasses[qualname]
@@ -1192,26 +1298,35 @@ class SerializableMetatype(ABCMeta):
 
     def __contains__(cls, subclass: str | type) -> bool:
         """
-        Membership test for the Serializable registry.
+        Check if a class or qualified name is registered.
 
         Parameters
         ----------
-        subclass : str or type
-            Either a fully qualified class name or a class object.
+        subclass : str | type
+            Either a qualified name string or a class type to check.
 
         Returns
         -------
         bool
-            True if the class is registered.
+            True if the class/name is registered, False otherwise.
 
         Raises
         ------
         TypeError
-            If input is not a str or type.
+            If subclass is neither a string nor a type.
+        NotImplementedError
+            If called on a subclass instead of Serializable base.
 
-        Notes
-        -----
-        This operation is only defined on the ``Serializable`` base class.
+        Examples
+        --------
+        >>> class MyClass(Serializable):
+        ...     pass
+        >>> get_full_qualified_name(MyClass) in Serializable
+        True
+        >>> MyClass in Serializable
+        True
+        >>> 'nonexistent.Class' in Serializable
+        False
         """
         if cls is Serializable:
             if isinstance(subclass, str):
@@ -1233,27 +1348,40 @@ class SerializableMetatype(ABCMeta):
     # ========== ========== ========== ========== ========== public methods
     def register_primitive_type(cls, primitive_type: type) -> None:
         """
-        Register a primitive type.
+        Register a type as a primitive that can be serialized as-is.
 
-        Primitive types are allowed to pass through in-memory serialization
-        unchanged. They must not be containers (list/dict/tuple) or Serializable
-        subclasses (which already have explicit serialization semantics).
+        Primitive types are serialized without any transformation - they pass
+        through the serialization process unchanged. Examples include str,
+        int, float, Path, etc.
 
         Parameters
         ----------
         primitive_type : type
-            Type to register.
+            The type to register as primitive.
 
         Raises
         ------
         TypeError
-            If the type is not eligible to be registered as primitive.
+            If attempting to register list, dict, tuple, or Serializable as
+            primitive types (these are handled specially).
+
+        Examples
+        --------
+        >>> class CustomPrimitive:
+        ...     pass
+        >>> Serializable.register_primitive_type(CustomPrimitive)
+        >>> Serializable.is_primitive_type(CustomPrimitive)
+        True
 
         Notes
         -----
-        Persistence semantics for a primitive type depend on ``Persistable``.
-        For example, ``Path`` is registered as a primitive here but is persisted
-        via a dedicated string encoding in HDF5 attributes.
+        By default, the following types are registered as primitives:
+        - str
+        - numbers.Number (int, float, complex, etc.)
+        - pathlib.Path
+
+        Collections (list, dict, tuple, set) are handled recursively and
+        cannot be registered as primitives.
         """
         if issubclass(primitive_type, (list, dict, tuple, Serializable)):
             raise TypeError(f'Cannot register {primitive_type} as primitive type')
@@ -1262,31 +1390,48 @@ class SerializableMetatype(ABCMeta):
 
     def remove_primitive_type(cls, primitive_type: type) -> None:
         """
-        Remove a primitive type from the registry.
+        Remove a type from the primitive types registry.
 
         Parameters
         ----------
         primitive_type : type
-            Type to remove.
+            The type to remove from the registry.
 
         Notes
         -----
-        This operation is idempotent: removing a non-registered type does not
-        raise.
+        If the type is not in the registry, this method does nothing (no error).
+
+        Examples
+        --------
+        >>> class CustomType:
+        ...     pass
+        >>> Serializable.register_primitive_type(CustomType)
+        >>> Serializable.remove_primitive_type(CustomType)
+        >>> Serializable.is_primitive_type(CustomType)
+        False
         """
         Serializable._primitive_types.discard(primitive_type)
 
     def is_primitive_type(cls, type_: type) -> bool:
         """
-        Return True if a type is registered as primitive.
+        Check if a type is registered as a primitive.
 
         Parameters
         ----------
         type_ : type
+            The type to check.
 
         Returns
         -------
         bool
+            True if the type is registered as primitive, False otherwise.
+
+        Examples
+        --------
+        >>> Serializable.is_primitive_type(str)
+        True
+        >>> Serializable.is_primitive_type(list)
+        False
         """
         return type_ in Serializable._primitive_types
 
@@ -1295,31 +1440,55 @@ class SerializableMetatype(ABCMeta):
                               disassemble: Callable[[Any], tuple[NDArray, dict]],
                               assemble: Callable[[NDArray, dict], Any]) -> None:
         """
-        Register a dataset-backed type.
+        Register a type that requires special handling for serialization.
 
-        Dataset types are treated as primitives during in-memory serialization,
-        but when persisted via ``Persistable``, they are stored as HDF5 datasets.
+        Dataset types are types that need to be converted to/from numpy arrays
+        for storage (e.g., in HDF5 datasets). The disassemble function converts
+        the object to an array and metadata dict, while assemble reconstructs
+        the object.
 
         Parameters
         ----------
         dataset_type : type
-            Type to register.
-        disassemble : callable
-            Function with signature ``disassemble(obj) -> (array, attrs)`` where
-            ``array`` is a NumPy ndarray and ``attrs`` is a dict of metadata to
-            store in dataset attributes.
-        assemble : callable
-            Function with signature ``assemble(array, attrs) -> obj`` used to
-            reconstruct objects from dataset storage.
+            The type to register.
+        disassemble : Callable[[Any], tuple[NDArray, dict]]
+            Function that converts an object to (array, attributes_dict).
+            The array will be stored as an HDF5 dataset, and attributes as
+            HDF5 attributes or group metadata.
+        assemble : Callable[[NDArray, dict], Any]
+            Function that reconstructs the object from array and attributes.
+
+        Examples
+        --------
+        Register a custom array-like type:
+
+        >>> class CustomArray:
+        ...     def __init__(self, data):
+        ...         self.data = data
+        ...
+        >>> def disassemble(obj):
+        ...     return np.array(obj.data), {'shape': len(obj.data)}
+        ...
+        >>> def assemble(arr, attrs):
+        ...     return CustomArray(arr.tolist())
+        ...
+        >>> Serializable.register_dataset_type(CustomArray, disassemble, assemble)
 
         Notes
         -----
-        Registration stores the process under both:
-        - the type object (dataset_type), and
-        - its fully qualified name (string)
+        Registering a dataset type also automatically registers it as a
+        primitive type. The type is registered both by type object and by
+        qualified name string for deserialization.
 
-        The dataset type is also registered as a primitive type to allow it to
-        pass through in-memory serialization.
+        Built-in registered dataset types:
+        - numpy.ndarray
+        - pandas.Timestamp
+        - pandas.DatetimeIndex
+
+        See Also
+        --------
+        remove_dataset_type : Remove a dataset type registration
+        is_dataset_type : Check if a type is registered as a dataset type
         """
         dataset_type_name = get_full_qualified_name(dataset_type)
 
@@ -1334,15 +1503,30 @@ class SerializableMetatype(ABCMeta):
 
     def remove_dataset_type(cls, dataset_type: type) -> None:
         """
-        Remove a dataset-backed type from the registry.
+        Remove a dataset type registration.
 
         Parameters
         ----------
         dataset_type : type
+            The type to remove from the registry.
 
         Notes
         -----
-        This also removes the corresponding primitive type registration.
+        This also removes the type from the primitive types registry.
+        If the type is not registered, this method does nothing.
+
+        Examples
+        --------
+        >>> class CustomDataset:
+        ...     pass
+        >>> Serializable.register_dataset_type(
+        ...     CustomDataset,
+        ...     lambda obj: (np.array([]), {}),
+        ...     lambda arr, attrs: CustomDataset()
+        ... )
+        >>> Serializable.remove_dataset_type(CustomDataset)
+        >>> Serializable.is_dataset_type(CustomDataset)
+        False
         """
         Serializable.remove_primitive_type(dataset_type)
 
@@ -1355,15 +1539,24 @@ class SerializableMetatype(ABCMeta):
 
     def is_dataset_type(cls, type_: type) -> bool:
         """
-        Return True if a type is registered as dataset-backed.
+        Check if a type is registered as a dataset type.
 
         Parameters
         ----------
         type_ : type
+            The type to check.
 
         Returns
         -------
         bool
+            True if the type is registered as a dataset type, False otherwise.
+
+        Examples
+        --------
+        >>> Serializable.is_dataset_type(np.ndarray)
+        True
+        >>> Serializable.is_dataset_type(str)
+        False
         """
         return type_ in Serializable._dataset_types
 
@@ -1371,93 +1564,290 @@ class SerializableMetatype(ABCMeta):
     @property
     def serializable_types(cls) -> list[Type[Serializable]]:
         """
-        list of Serializable subclasses currently registered.
+        Get a list of all registered Serializable subclasses.
+
+        Returns
+        -------
+        list[Type[Serializable]]
+            List of all registered Serializable classes.
+
+        Examples
+        --------
+        >>> class MyClass1(Serializable):
+        ...     pass
+        >>> class MyClass2(Serializable):
+        ...     pass
+        >>> types = Serializable.serializable_types
+        >>> MyClass1 in types
+        True
+        >>> MyClass2 in types
+        True
         """
         return list(Serializable._subclasses.values())
 
     @property
     def primitive_types(cls) -> list[type]:
         """
-        list of primitive types currently registered.
+        Get a list of all registered primitive types.
+
+        Returns
+        -------
+        list[type]
+            List of all registered primitive types.
+
+        Examples
+        --------
+        >>> types = Serializable.primitive_types
+        >>> str in types
+        True
+        >>> Number in types
+        True
         """
         return list(Serializable._primitive_types)
 
     @property
     def dataset_types(cls) -> list[type]:
         """
-        list of dataset-backed types currently registered.
+        Get a list of all registered dataset types.
+
+        Returns
+        -------
+        list[type]
+            List of all registered dataset types (type objects only, not strings).
+
+        Examples
+        --------
+        >>> types = Serializable.dataset_types
+        >>> np.ndarray in types
+        True
+        >>> all(isinstance(t, type) for t in types)
+        True
+
+        Notes
+        -----
+        This property filters out string keys (qualified names) and returns
+        only the actual type objects.
         """
         return [_type for _type in Serializable._dataset_types.keys() if not isinstance(_type, str)]
 
     @property
     def serializable_properties(cls) -> dict[str, SerializableProperty]:
         """
+        Get all SerializableProperty descriptors on this class.
+
+        Returns
+        -------
         dict[str, SerializableProperty]
-            Copy of the serialization schema mapping for this class, including
-            inherited properties discovered across the full MRO.
+            Dictionary mapping property names to descriptors.
+
+        Examples
+        --------
+        >>> class MyClass(Serializable):
+        ...     prop1 = SerializableProperty(default=0)
+        ...     prop2 = SerializableProperty(default="")
+        ...
+        >>> props = MyClass.serializable_properties
+        >>> 'prop1' in props
+        True
+        >>> 'prop2' in props
+        True
+
+        Notes
+        -----
+        This includes properties inherited from base classes.
+        Returns a copy of the internal dictionary to prevent modification.
         """
         return {**cls._serializable_properties}
 
     @property
     def copiable_properties(cls) -> dict[str, SerializableProperty]:
         """
+        Get SerializableProperty descriptors marked as copiable.
+
+        Returns
+        -------
         dict[str, SerializableProperty]
-            Subset of ``serializable_properties`` containing only properties
-            with ``copiable=True``.
+            Dictionary mapping property names to copiable descriptors.
+
+        Examples
+        --------
+        >>> class MyClass(Serializable):
+        ...     data = SerializableProperty(default=0, copiable=True)
+        ...     cache = SerializableProperty(default=0, copiable=False)
+        ...
+        >>> props = MyClass.copiable_properties
+        >>> 'data' in props
+        True
+        >>> 'cache' in props
+        False
+
+        Notes
+        -----
+        Copiable properties are those that should be persisted to disk.
+        Non-copiable properties (like cached values or temporary state) are
+        excluded from serialization when is_copy=True.
+
+        See Also
+        --------
+        Serializable.serialize : Uses copiable flag when is_copy=True
         """
         return {k: v for k, v in cls.serializable_properties.items() if v.copiable}
 
 
 class Serializable(metaclass=SerializableMetatype):
     """
-    Base class for registry-backed structured serialization.
+    Base class for objects that can be serialized to/from dictionaries.
 
-    Serializable defines:
-    - A declarative schema via ``SerializableProperty`` descriptors.
-    - A global registry that maps fully qualified names to classes.
-    - An in-memory serialization format (dict/list/scalars) with a class
-      envelope key ``"__class__"``.
-    - Copy and equality semantics based on ``copiable`` properties.
+    Serializable provides a framework for converting Python objects to dictionary
+    structures suitable for persistence in HDF5 files or other storage backends.
+    It handles nested objects, collections, primitive types, and special dataset
+    types like NumPy arrays and Pandas timestamps.
 
-    Construction
-    ------------
-    Serializable(**kwargs)
-        Initialize an instance by setting serializable properties. Keys must
-        match the class schema (including inherited properties). Extra keys
-        raise ValueError.
-
-    Serializable(other)
-        Copy construction: if a single positional argument is provided and it
-        is an instance of the same type, initializes from the serialized copy
-        representation (copiable properties only).
-
-    Equality
+    Features
     --------
-    ``a == b`` is defined only for objects of the same type and compares all
-    copiable properties. For values that support NumPy broadcasting, equality
-    uses ``numpy.all(other_value == self_value)``.
+    - **Recursive serialization**: Handles nested Serializable objects and collections
+    - **Type preservation**: Stores class information for accurate deserialization
+    - **Flexible construction**: Initialize from kwargs or copy from another instance
+    - **Copy functionality**: Create independent copies with selective property copying
+    - **Equality comparison**: Compare objects based on their serializable state
+    - **Extensible type system**: Register custom primitive and dataset types
+
+    Parameters
+    ----------
+    *args : tuple
+        Variable positional arguments. Supports:
+        - No args: Initialize from kwargs
+        - One Serializable instance: Copy constructor
+    **kwargs : dict
+        Keyword arguments mapping property names to values.
+
+    Raises
+    ------
+    ValueError
+        If args don't match any supported initialization signature, or if
+        kwargs contain unknown property names.
+
+    Examples
+    --------
+    Define a Serializable class:
+
+    >>> class Experiment(Serializable):
+    ...     name = SerializableProperty(default="")
+    ...     temperature = SerializableProperty(default=293.15)
+    ...     data = SerializableProperty(default=None)
+    ...
+    >>> exp = Experiment(name="Test", temperature=373.15)
+    >>> exp.name
+    'Test'
+
+    Serialize to a dictionary:
+
+    >>> data = Serializable.serialize(exp)
+    >>> data['__class__']  # doctest: +SKIP
+    '__main__.Experiment'
+    >>> data['name']
+    'Test'
+
+    Deserialize back to an object:
+
+    >>> restored = Serializable.deserialize(data)
+    >>> restored.name
+    'Test'
+    >>> restored.temperature
+    373.15
+
+    Copy an object:
+
+    >>> copy = exp.copy()
+    >>> copy is exp
+    False
+    >>> copy == exp
+    True
+
+    Nested objects work automatically:
+
+    >>> class Trial(Serializable):
+    ...     trial_num = SerializableProperty(default=0)
+    ...     experiment = SerializableProperty(default=None)
+    ...
+    >>> trial = Trial(trial_num=1, experiment=exp)
+    >>> data = Serializable.serialize(trial)
+    >>> restored = Serializable.deserialize(data)
+    >>> restored.experiment.name
+    'Test'
+
+    Collections are handled recursively:
+
+    >>> exp_list = [Experiment(name=f"Exp{i}") for i in range(3)]
+    >>> serialized = Serializable.serialize(exp_list)
+    >>> restored = Serializable.deserialize(serialized)
+    >>> len(restored)
+    3
 
     Notes
     -----
-    In-memory serialization is strict: if an object is not:
-    - None,
-    - a list/tuple,
-    - a dict,
-    - a Serializable, or
-    - an instance of a registered primitive type,
-    then serialization raises TypeError.
+    All Serializable properties must be SerializableProperty descriptors.
+    Regular attributes are not included in serialization.
+
+    The serialization format uses dictionaries with a special '__class__' key
+    to store the fully qualified class name. This allows accurate reconstruction
+    of the original object type.
+
+    When using is_copy=True in serialize(), only properties with copiable=True
+    are included. This is useful for persistence - you can mark cached or
+    temporary properties as non-copiable.
 
     See Also
     --------
-    Persistable
-    SerializableProperty
+    SerializableProperty : Descriptor for serializable properties
+    SerializableMetatype : Metaclass that enables serialization
     """
     # ========== ========== ========== ========== ========== class attributes
     ...
 
     # ========== ========== ========== ========== ========== special methods
     def __init__(self, *args, **kwargs) -> None:
+        """
+        Initialize a Serializable object.
 
+        Supports three initialization modes:
+        1. From keyword arguments: `obj = MyClass(prop1=val1, prop2=val2)`
+        2. Copy constructor: `obj2 = MyClass(obj1)`
+        3. Internal use during deserialization
+
+        Parameters
+        ----------
+        *args : tuple
+            If empty, initialize from kwargs.
+            If one Serializable instance, perform copy construction.
+        **kwargs : dict
+            Property names mapped to values.
+
+        Raises
+        ------
+        ValueError
+            If args don't match a supported signature, or if kwargs contain
+            properties not defined on the class.
+
+        Examples
+        --------
+        Initialize from kwargs:
+
+        >>> class MyClass(Serializable):
+        ...     value = SerializableProperty(default=0)
+        ...
+        >>> obj = MyClass(value=42)
+        >>> obj.value
+        42
+
+        Copy constructor:
+
+        >>> obj2 = MyClass(obj)
+        >>> obj2.value
+        42
+        >>> obj2 is obj
+        False
+        """
         if not args:
             # then it is trying to initialize by setting the serializable properties
             self._initialize_from_data(kwargs)
@@ -1478,22 +1868,50 @@ class Serializable(metaclass=SerializableMetatype):
 
     def __eq__(self, other):
         """
-        Compare two Serializable objects for equality.
+        Compare equality based on copiable properties.
+
+        Two Serializable objects are equal if they are the same type and all
+        their copiable properties have equal values.
 
         Parameters
         ----------
-        other : object
-            Object to compare.
+        other : Any
+            The object to compare with.
 
         Returns
         -------
         bool
-            True if all copiable properties are equal.
+            True if objects are equal, False otherwise.
 
-        Raises
-        ------
-        TypeError
-            If ``other`` is not the same concrete type as ``self``.
+        Notes
+        -----
+        Only copiable properties are compared. Non-copiable properties (like
+        caches or temporary state) are ignored.
+
+        For nested Serializable objects, comparison is recursive.
+        For NumPy arrays, uses numpy.all() for element-wise comparison.
+
+        Examples
+        --------
+        >>> class MyClass(Serializable):
+        ...     value = SerializableProperty(default=0)
+        ...
+        >>> obj1 = MyClass(value=42)
+        >>> obj2 = MyClass(value=42)
+        >>> obj3 = MyClass(value=99)
+        >>> obj1 == obj2
+        True
+        >>> obj1 == obj3
+        False
+
+        Different types are never equal:
+
+        >>> class OtherClass(Serializable):
+        ...     value = SerializableProperty(default=0)
+        ...
+        >>> obj4 = OtherClass(value=42)
+        >>> obj1 == obj4
+        False
         """
         if type(other) is not type(self):
             return False
@@ -1519,6 +1937,27 @@ class Serializable(metaclass=SerializableMetatype):
         return True
 
     def __copy__(self):
+        """
+        Support for the copy module.
+
+        Returns
+        -------
+        Serializable
+            A copy of this object.
+
+        Examples
+        --------
+        >>> import copy
+        >>> class MyClass(Serializable):
+        ...     value = SerializableProperty(default=0)
+        ...
+        >>> obj = MyClass(value=42)
+        >>> copied = copy.copy(obj)
+        >>> copied.value
+        42
+        >>> copied is obj
+        False
+        """
         return self.copy()
 
     # ========== ========== ========== ========== ========== private methods
@@ -1527,22 +1966,34 @@ class Serializable(metaclass=SerializableMetatype):
     # ========== ========== ========== ========== ========== protected methods
     def _initialize_from_data(self, data: dict[str, Any]) -> None:
         """
-        Initialize an instance from a serialized mapping.
+        Initialize object properties from a dictionary.
+
+        This is an internal method called during construction and deserialization.
+        It validates the data, removes the __class__ key if present, sets all
+        properties, and ensures no unknown keys remain.
 
         Parameters
         ----------
-        data : dict
-            Mapping containing serialized values. If the mapping contains a
-            ``"__class__"`` key, it must resolve to the current type.
+        data : dict[str, Any]
+            Dictionary mapping property names to values.
 
         Raises
         ------
         TypeError
-            If data is not a dict.
-        ValueError
-            If extra keys remain after consuming the class schema.
+            If data is not a dictionary.
         AssertionError
-            If ``"__class__"`` exists and does not match this type.
+            If __class__ key is present but doesn't match this class.
+        ValueError
+            If data contains keys that are not defined properties.
+
+        Notes
+        -----
+        This method:
+        1. Validates data is a dict
+        2. Checks __class__ if present
+        3. Deserializes each property value
+        4. Sets each property via setattr (triggers parsers, observers, etc.)
+        5. Ensures all keys were consumed (no unknowns)
         """
         # data must be a dictionary
         check_types(data, dict)
@@ -1564,37 +2015,88 @@ class Serializable(metaclass=SerializableMetatype):
     @staticmethod
     def serialize(obj: Any, is_copy: bool = False) -> Any:
         """
-        Serialize an object into the module's Python-native representation.
+        Recursively serialize an object to a dictionary structure.
+
+        Converts Python objects to a nested dictionary structure suitable for
+        JSON, HDF5 attributes, or other storage formats. Handles Serializable
+        objects, collections, primitives, and dataset types.
 
         Parameters
         ----------
-        obj : object
-            Object to serialize.
-        is_copy : bool, default False
-            If True, uses the object's copy schema: only copiable properties of
-            Serializable instances are serialized. This is used internally by
-            copy construction and ``copy()``.
+        obj : Any
+            The object to serialize.
+        is_copy : bool, optional
+            If True, only serialize copiable properties. If False, serialize
+            all properties. Default is False.
 
         Returns
         -------
-        object
-            Serialized representation. For Serializable instances, returns a
-            dict containing ``"__class__"`` and serialized properties.
+        Any
+            The serialized representation:
+            - Serializable → dict with '__class__' key
+            - list/tuple/set → list (recursively serialized)
+            - dict → dict (recursively serialized values)
+            - Primitives → unchanged
+            - None → None
 
         Raises
         ------
         TypeError
-            If no serialization process exists for the object type.
+            If the object's type is not registered as primitive, dataset, or
+            Serializable.
 
         Examples
         --------
-        >>> class A(Serializable):
-        ...     @serializable_property(default=1)
-        ...     def x(self): ...
+        Serialize a simple object:
+
+        >>> class MyClass(Serializable):
+        ...     value = SerializableProperty(default=0)
         ...
-        >>> a = A(x=2)
-        >>> Serializable.serialize(a)["__class__"]  # doctest: +SKIP
-        '...A'
+        >>> obj = MyClass(value=42)
+        >>> data = Serializable.serialize(obj)
+        >>> '__class__' in data
+        True
+        >>> data['value']
+        42
+
+        Serialize with copy mode (only copiable properties):
+
+        >>> class MyClass2(Serializable):
+        ...     important = SerializableProperty(default=0, copiable=True)
+        ...     cache = SerializableProperty(default=0, copiable=False)
+        ...
+        >>> obj = MyClass2(important=10, cache=20)
+        >>> data = Serializable.serialize(obj, is_copy=True)
+        >>> 'important' in data
+        True
+        >>> 'cache' in data
+        False
+
+        Collections are handled recursively:
+
+        >>> data = Serializable.serialize([1, "two", 3.0])
+        >>> data
+        [1, 'two', 3.0]
+
+        Notes
+        -----
+        The serialization format for Serializable objects is:
+        ```python
+        {
+            '__class__': 'module.ClassName',
+            'property1': value1,
+            'property2': value2,
+            ...
+        }
+        ```
+
+        Tuples and sets are converted to lists (Python's JSON doesn't
+        distinguish these).
+
+        See Also
+        --------
+        deserialize : Reconstruct objects from serialized data
+        copy : Create a copy using serialize with is_copy=True
         """
         if obj is None:
             return None
@@ -1628,34 +2130,85 @@ class Serializable(metaclass=SerializableMetatype):
     @staticmethod
     def deserialize(data: Any) -> Any:
         """
-        Deserialize an object from the module's serialized representation.
+        Recursively deserialize data to reconstruct objects.
+
+        Converts serialized dictionary structures back into Python objects.
+        Handles nested Serializable objects, collections, and primitives.
 
         Parameters
         ----------
-        data : object
-            Serialized data produced by ``serialize`` or loaded via
-            ``Persistable``.
+        data : Any
+            The serialized data to deserialize.
 
         Returns
         -------
-        object
-            Reconstructed object graph.
+        Any
+            The reconstructed object:
+            - dict with '__class__' → Serializable instance
+            - list → list (recursively deserialized)
+            - dict without '__class__' → dict (recursively deserialized)
+            - Primitives → unchanged
+            - None → None
 
         Raises
         ------
         TypeError
-            If no deserialization process exists for the data.
+            If the data type is not supported for deserialization.
+
+        Examples
+        --------
+        Deserialize a simple object:
+
+        >>> class MyClass(Serializable):
+        ...     value = SerializableProperty(default=0)
+        ...
+        >>> qualname = get_full_qualified_name(MyClass)
+        >>> data = {'__class__': qualname, 'value': 42}
+        >>> obj = Serializable.deserialize(data)
+        >>> obj.value
+        42
+
+        Roundtrip serialization:
+
+        >>> original = MyClass(value=99)
+        >>> data = Serializable.serialize(original)
+        >>> restored = Serializable.deserialize(data)
+        >>> restored.value
+        99
+        >>> original == restored
+        True
+
+        Collections are handled recursively:
+
+        >>> data = [1, 2, {'a': 3}]
+        >>> result = Serializable.deserialize(data)
+        >>> result
+        [1, 2, {'a': 3}]
+
+        Unknown classes create generic Serializable objects:
+
+        >>> data = {
+        ...     '__class__': 'unknown.Module.UnknownClass',
+        ...     'prop1': 42,
+        ...     'prop2': "test"
+        ... }
+        >>> obj = Serializable.deserialize(data)
+        >>> obj.prop1
+        42
 
         Notes
         -----
-        If ``data`` is a dict containing a ``"__class__"`` key, this function
-        attempts to resolve the class name using the registry. If not found,
-        it constructs a synthetic class ``_Generic<ClassName>`` and installs
-        placeholder SerializableProperties for each serialized key.
+        If a class referenced in '__class__' is not registered (not imported),
+        deserialize creates a generic Serializable subclass on-the-fly with
+        the necessary properties. This allows reading data even when the
+        original class definition is unavailable.
 
-        This behavior is intended for forward compatibility. Code consuming
-        the object may inspect ``type(obj).__name__.startswith("_Generic")``
-        if it needs to detect unknown types.
+        Deserialization triggers all property parsers, observers, and
+        post-initializers as if the object were being constructed normally.
+
+        See Also
+        --------
+        serialize : Convert objects to serializable data
         """
         if data is None:
             return None
@@ -1697,13 +2250,42 @@ class Serializable(metaclass=SerializableMetatype):
 
     def copy(self) -> Serializable:
         """
-        Create a logical copy of this object.
+        Create an independent copy of this object.
+
+        Uses serialization with is_copy=True, so only copiable properties
+        are included in the copy.
 
         Returns
         -------
         Serializable
-            New instance of the same type initialized using copy semantics
-            (copiable properties only).
+            A new instance with the same copiable property values.
+
+        Examples
+        --------
+        >>> class MyClass(Serializable):
+        ...     value = SerializableProperty(default=0, copiable=True)
+        ...     cache = SerializableProperty(default=0, copiable=False)
+        ...
+        >>> obj = MyClass(value=42, cache=100)
+        >>> copied = obj.copy()
+        >>> copied.value
+        42
+        >>> copied.cache
+        0
+        >>> copied is obj
+        False
+
+        Notes
+        -----
+        The copy is created via serialization, so:
+        - Only copiable properties are copied
+        - Non-copiable properties use their defaults
+        - Nested objects are also copied (deep copy)
+        - All property initialization (parsers, observers, initializers) runs
+
+        See Also
+        --------
+        __copy__ : Implements copy.copy() support
         """
         return type(self)(self)
 
@@ -1717,10 +2299,44 @@ Serializable.register_primitive_type(Path)
 
 # ========== ========== ========== Register ndarray as dataset_type
 def disassemble_ndarray(arr: NDArray) -> tuple[NDArray, dict[str]]:
+    """
+    Disassemble a NumPy array for serialization.
+
+    Parameters
+    ----------
+    arr : NDArray
+        The array to disassemble.
+
+    Returns
+    -------
+    tuple[NDArray, dict]
+        The array itself and an empty attributes dictionary.
+
+    Notes
+    -----
+    NumPy arrays don't need special processing, but are registered as
+    dataset types to indicate they should be stored as HDF5 datasets
+    rather than attributes.
+    """
     return arr, {}
 
 
 def assemble_ndarray(arr: NDArray, arr_attrs: dict[str]) -> NDArray:
+    """
+    Assemble a NumPy array from serialized data.
+
+    Parameters
+    ----------
+    arr : NDArray
+        The array data.
+    arr_attrs : dict
+        Attributes dictionary (unused for plain arrays).
+
+    Returns
+    -------
+    NDArray
+        The array itself.
+    """
     return arr
 
 
@@ -1730,7 +2346,28 @@ Serializable.register_dataset_type(numpy.ndarray,
 
 # ========== ========== ========== Register pandas DatetimeIndex and Timestamp as dataset_type
 def disassemble_pandas_time(time: pandas.DatetimeIndex | pandas.Timestamp) -> tuple[NDArray, dict[str]]:
+    """
+    Disassemble pandas datetime objects for serialization.
 
+    Converts timezone-aware datetimes to UTC then removes timezone for storage
+    as int64 nanoseconds. Timezone information is stored in attributes.
+
+    Parameters
+    ----------
+    time : pd.DatetimeIndex | pd.Timestamp
+        The datetime object to disassemble.
+
+    Returns
+    -------
+    tuple[NDArray, dict]
+        Array of int64 nanoseconds and dict with 'timezone' key.
+
+    Notes
+    -----
+    Timezone-naive datetimes are stored directly as int64.
+    Timezone-aware datetimes are converted to UTC, stored as int64,
+    with the timezone string saved in attributes for reconstruction.
+    """
     if time.tz is None:
         time_array = time.to_numpy().astype(numpy.int64)
         timezone = None
@@ -1743,6 +2380,24 @@ def disassemble_pandas_time(time: pandas.DatetimeIndex | pandas.Timestamp) -> tu
 
 
 def assemble_pandas_time(time_array: NDArray, time_attrs: dict[str]) -> pandas.DatetimeIndex | pandas.Timestamp:
+    """
+    Assemble pandas datetime objects from serialized data.
+
+    Reconstructs timezone-aware datetimes by first converting from int64,
+    then localizing to the stored timezone.
+
+    Parameters
+    ----------
+    time_array : NDArray
+        Array of int64 nanosecond values.
+    time_attrs : dict
+        Dictionary with 'timezone' key (None or timezone string).
+
+    Returns
+    -------
+    pd.DatetimeIndex | pd.Timestamp
+        Reconstructed datetime object with timezone if applicable.
+    """
     time = pandas.to_datetime(time_array)
     tz = time_attrs.pop('timezone')
 
@@ -1763,82 +2418,11 @@ Serializable.register_dataset_type(pandas.DatetimeIndex,
 
 # ========== ========== ========== ========== ========== ==========
 class Persistable(Serializable):
-    """
-    Serializable that can be persisted to disk using HDF5.
-
-    Persistable extends Serializable with:
-    - HDF5 save/load methods,
-    - a tree encoding for lists/dicts/scalars/paths/None,
-    - dataset storage for registered dataset-backed types, and
-    - lazy dataset access through ProxyDataset when used as a context manager.
-
-    File extension
-    --------------
-    The default file extension is stored in the class attribute ``extension``.
-    When ``save(..., use_default_extension=True)`` is used, the given path is
-    rewritten with this suffix.
-
-    HDF5 encoding rules
-    -------------------
-    Values are encoded into groups as follows:
-
-    - None:
-      Stored as attribute value "NoneType:None".
-    - Path:
-      Stored as attribute "Path:<absolute path>".
-    - str, Number:
-      Stored directly as an attribute.
-    - list:
-      Stored as a subgroup with ``__container_type__ = "list"`` and items
-      stored under numeric string keys ("0", "1", ...).
-    - dict:
-      Stored as a subgroup with ``__container_type__ = "dict"`` and items stored
-      under their keys.
-    - dataset-backed types:
-      Stored as HDF5 datasets with metadata attributes including:
-      ``__dataset_type__ = "<qualified type name>"``.
-
-    Context manager behavior
-    ------------------------
-    If constructed as ``Persistable(path, mode="r")`` (or similar) and used as
-    ``with ... as obj:``, the instance loads its metadata immediately, but
-    dataset values are replaced with ``ProxyDataset`` objects that fetch and
-    assemble on access.
-
-    See Also
-    --------
-    Serializable.register_dataset_type
-    Persistable.ProxyDataset
-    """
 
     # ========== ========== ========== ========== ========== class attributes
     extension: str = '.hdf5'
 
     class ProxyDataset:
-        """
-        Lazy wrapper for a persisted dataset.
-
-        ProxyDataset provides indexed access to an underlying ``h5py.Dataset``.
-        When an element or slice is read, the dataset's registered ``assemble``
-        function is applied to return a high-level object. When writing, the
-        registered ``disassemble`` function is applied.
-
-        This is primarily intended to avoid loading large arrays eagerly.
-
-        Parameters
-        ----------
-        dataset : h5py.Dataset
-            Dataset handle.
-
-        Notes
-        -----
-        The dataset must include a ``__dataset_type__`` attribute identifying
-        the dataset-backed type. The remaining dataset attributes are treated
-        as assembly metadata.
-
-        ProxyDataset enforces that writes are compatible with existing metadata
-        by asserting that the produced attrs dict matches the dataset's attrs.
-        """
 
         def __init__(self, dataset: h5py.Dataset) -> None:
             self._dataset = dataset
@@ -1846,53 +2430,12 @@ class Persistable(Serializable):
             self._dataset_type_name = self._attrs.pop('__dataset_type__')
 
         def __getitem__(self, item) -> Any:
-            """
-            Retrieve item(s) from the dataset and assemble them.
-
-            Parameters
-            ----------
-            item : int or slice or tuple
-                Index/slice passed directly to the underlying dataset.
-
-            Returns
-            -------
-            object
-                Result of applying the registered ``assemble`` function to the
-                selected ndarray and the dataset metadata.
-
-            Notes
-            -----
-            This method reads only the portion of the dataset addressed by
-            ``item`` and assembles the corresponding object.
-            """
             assemble = Serializable._dataset_types[self._dataset_type_name]['assemble']
             array = self._dataset[item]
 
             return assemble(array, self.attrs)
 
         def __setitem__(self, key, value) -> None:
-            """
-            Assign item(s) in the dataset from a high-level object.
-
-            Parameters
-            ----------
-            key : int or slice or tuple
-                Index/slice passed directly to the underlying dataset.
-            value : object
-                High-level object compatible with the dataset type.
-
-            Notes
-            -----
-            Resizing behavior:
-            If key addresses positions beyond the current size on axis 0, this
-            method attempts to resize the dataset along axis 0 before writing.
-            This behavior is marked experimental in the implementation, but is
-            supported by tests.
-
-            Metadata behavior:
-            The disassembled attrs must match the dataset attrs (excluding the
-            internal dataset type marker).
-            """
             # this code block is meant to test if key is inside the dataset limits,
             # otherwise resizing it. This is actually pretty experimental, but passed
             # in the proposed tests
@@ -1911,21 +2454,6 @@ class Persistable(Serializable):
             self._dataset[key] = arr
 
         def append(self, value: Any) -> None:
-            """
-            Append value to the dataset along axis 0.
-
-            Parameters
-            ----------
-            value : object
-                Value to append. Must disassemble into an ndarray whose first
-                dimension corresponds to append length (typically 1 for scalar-
-                like items or N for batch append).
-
-            Notes
-            -----
-            The underlying dataset is resized on axis 0 and the new block is
-            assigned in one operation.
-            """
             disassemble = Serializable._dataset_types[self._dataset_type_name]['disassemble']
             arr, attrs = disassemble(value)
             assert attrs == self.attrs
@@ -1939,87 +2467,31 @@ class Persistable(Serializable):
 
         @property
         def attrs(self) -> dict:
-            """
-            dict
-                A copy of the dataset metadata attributes used for assembly.
-            """
             return self._attrs.copy()
 
         # ---------- ---------- ---------- ---------- ---------- ----------
         @property
         def shape(self) -> tuple[int]:
-            """
-            tuple of int
-                Dataset shape.
-            """
             return self._dataset.shape
 
         @property
         def size(self) -> int:
-            """
-            int
-                Total number of elements.
-            """
             return self._dataset.size
 
         @property
         def dtype(self) -> numpy.dtype:
-            """
-            numpy.dtype
-                Dataset dtype.
-            """
             return self._dataset.dtype
 
         @property
         def ndim(self) -> int:
-            """
-            int
-                Number of dataset dimensions.
-            """
             return self._dataset.ndim
 
         @property
         def nbytes(self) -> int:
-            """
-            int
-                Total bytes consumed by the dataset payload (not counting
-                metadata overhead).
-            """
             return self._dataset.nbytes
 
     # ========== ========== ========== ========== ========== special methods
     def __init__(self, *args, **kwargs) -> None:
-        """
-        Initialize a Persistable instance.
-
-        Construction patterns
-        ---------------------
-        Persistable(**kwargs)
-            Regular Serializable initialization.
-
-        Persistable(path)
-            If a path is provided as the first positional argument and no
-            keyword arguments are supplied, the instance loads data from disk
-            and initializes itself immediately.
-
-        Persistable(path, mode=...)
-            If a path is provided and keyword arguments are present, the
-            instance is prepared for context manager usage. The file is opened
-            in ``__enter__`` and closed in ``__exit__``.
-
-        Parameters
-        ----------
-        *args
-            Either standard Serializable args or a single path-like string/Path.
-        **kwargs
-            If using context manager mode, must include ``mode`` (as accepted by
-            ``h5py.File``).
-
-        Raises
-        ------
-        ValueError
-            If unexpected keyword arguments remain after consuming ``mode``.
-        """
         if args and isinstance(args[0], (str, Path)):
 
             filepath = Path(args[0])
@@ -2040,22 +2512,7 @@ class Persistable(Serializable):
         else:
             super().__init__(*args, **kwargs)
 
-
     def __enter__(self) -> Persistable:
-        """
-        Enter context manager: open the HDF5 file and load metadata.
-
-        Returns
-        -------
-        Persistable
-            The initialized object.
-
-        Notes
-        -----
-        When entering context manager mode, datasets are loaded as ProxyDataset
-        objects (lazy). Non-dataset data is loaded eagerly as normal Python
-        objects.
-        """
         self.__file = h5py.File(self._path, mode=self._mode)
 
         data = type(self)._load_data_from_h5py_tree(self.__file['root'], use_proxy_dataset=True)
@@ -2065,18 +2522,6 @@ class Persistable(Serializable):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """
-        Exit context manager: close the HDF5 file.
-
-        Parameters
-        ----------
-        exc_type, exc_val, exc_tb
-            Exception information as provided by the context manager protocol.
-
-        Notes
-        -----
-        This method always closes the file handle. Exceptions are not suppressed.
-        """
         self.__file.close()
 
     # ========== ========== ========== ========== ========== private methods
@@ -2085,32 +2530,6 @@ class Persistable(Serializable):
     # ========== ========== ========== ========== ========== protected methods
     @staticmethod
     def _save_data_in_group(key: str, value: Any, group: h5py.Group) -> None:
-        """
-        Save a serialized value under a given key inside an HDF5 group.
-
-        Parameters
-        ----------
-        key : str
-            Name to store the value under.
-        value : object
-            Value to store. Must be one of the supported types described in the
-            Persistable class docstring.
-        group : h5py.Group
-            Group where the value will be stored.
-
-        Raises
-        ------
-        TypeError
-            If the value type cannot be persisted.
-
-        Notes
-        -----
-        This function implements the recursive encoding for:
-        - None and Path markers stored as strings in attributes,
-        - scalars stored directly as attributes,
-        - lists/dicts stored as subgroups,
-        - dataset-backed types stored as datasets.
-        """
         if value is None:
             group.attrs[key] = 'NoneType:None'
 
@@ -2157,35 +2576,6 @@ class Persistable(Serializable):
 
     @staticmethod
     def _load_data_from_h5py_tree(value: Any, use_proxy_dataset: bool = False) -> Any:
-        """
-        Load a value from an HDF5 group/dataset/attribute recursively.
-
-        Parameters
-        ----------
-        value : object
-            An h5py.Group, h5py.Dataset, or attribute value.
-        use_proxy_dataset : bool, default False
-            If True, datasets are wrapped in ProxyDataset objects instead of
-            being assembled eagerly.
-
-        Returns
-        -------
-        object
-            The reconstructed Python object.
-
-        Raises
-        ------
-        ValueError
-            If a container group has an unknown ``__container_type__``.
-        KeyError
-            If a dataset references an unknown dataset type in the registry.
-
-        Notes
-        -----
-        Special markers:
-        - "NoneType:None" maps to None.
-        - "Path:<...>" maps to pathlib.Path.
-        """
         if isinstance(value, h5py.Group):
 
             data = {k: Persistable._load_data_from_h5py_tree(v, use_proxy_dataset=use_proxy_dataset) for k, v in value.items()}
@@ -2234,44 +2624,11 @@ class Persistable(Serializable):
 
     # ========== ========== ========== ========== ========== public methods
     def save_serialized_data(self, path: Path|str, data: Any) -> None:
-        """
-        Persist a serialized representation to an HDF5 file.
-
-        Parameters
-        ----------
-        path : str or Path
-            Destination file path.
-        data : object
-            Serialized data tree (as produced by ``Serializable.serialize``).
-
-        Notes
-        -----
-        This method does not enforce a file extension. Extension handling is
-        performed by ``save``.
-        """
         with h5py.File(Path(path), 'w') as file:
             self._save_data_in_group('root', data, file)
 
     @classmethod
     def load_serialized_data(cls, path: Path|str) -> Any:
-        """
-        Load serialized data from an HDF5 file.
-
-        Parameters
-        ----------
-        path : str or Path
-            Source file path.
-
-        Returns
-        -------
-        object
-            Serialized data tree.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the path does not exist or is not a file.
-        """
         path = Path(path)
 
         if not path.is_file():
@@ -2286,23 +2643,6 @@ class Persistable(Serializable):
              path: Path | str,
              overwrite: bool = True,
              use_default_extension: bool = True) -> None:
-        """
-        Serialize and save this instance to an HDF5 file.
-
-        Parameters
-        ----------
-        path : str or Path
-            Output path.
-        overwrite : bool, default True
-            If False and the file exists, raises FileExistsError.
-        use_default_extension : bool, default True
-            If True, rewrites the suffix of ``path`` to ``type(self).extension``.
-
-        Raises
-        ------
-        FileExistsError
-            If the file exists and overwrite is False.
-        """
         # ---------- ---------- resolve path
         path = Path(path)
 
@@ -2318,25 +2658,6 @@ class Persistable(Serializable):
 
     @classmethod
     def load(cls, path: Path|str) -> Persistable:
-        """
-        Load and deserialize a Persistable object from disk.
-
-        Parameters
-        ----------
-        path : str or Path
-            Source file path.
-
-        Returns
-        -------
-        Persistable
-            The reconstructed object. The returned object is the concrete class
-            encoded in the serialized representation (not necessarily ``cls``).
-
-        Notes
-        -----
-        This method reads the serialized tree and then calls
-        ``Serializable.deserialize`` to reconstruct the object graph.
-        """
         data = cls.load_serialized_data(path)
         return Serializable.deserialize(data)
 
