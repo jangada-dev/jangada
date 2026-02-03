@@ -19,6 +19,7 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
     extension = '.sys'
 
     # ========== ========== ========== ========== serializable properties
+    ...
 
     # ---------- ---------- ---------- ---------- subsystems
     subsystems = SerializableProperty()
@@ -67,7 +68,7 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
         return _subsystems
 
     # ---------- ---------- ---------- ---------- supersystem_id
-    supersystem_id = SerializableProperty()
+    supersystem_id = SerializableProperty()#  -*- coding: utf-8 -*-
 
     @supersystem_id.parser
     def supersystem_id(self, value: str|None) -> str|None:

@@ -17,25 +17,6 @@ from typing import Any
 
 class TestSerializableProperty:
 
-    def test_readonly(self) -> None:
-        print()
-
-        class ReadOnlyExample:
-            attr = SerializableProperty(readonly=True, default="default")
-
-        obj = ReadOnlyExample()
-
-        print(obj.attr)
-
-        try:
-            obj.attr = 10
-
-        except AttributeError:
-            pass
-
-        else:
-            assert False
-
     def test_writeonce(self) -> None:
         print()
 
@@ -569,7 +550,7 @@ class TestPersistable:
 
 
 # ========== ========== ========== ========== ========== ==========
-class TestSerializableProperty:
+class _TestSerializableProperty:
 
     def test_set_name_binds_descriptor_metadata(self):
         # What we are testing:

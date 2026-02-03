@@ -8,8 +8,24 @@
     :show-inheritance:
 
 
-Descriptor Interface
-====================
+Type Aliases
+============
+
+SerializableProperty uses type aliases to provide clear signatures for callback
+functions. See :doc:`type_aliases` for detailed documentation.
+
+- :data:`~jangada.serialization.T` - Type variable for property values
+- :data:`~jangada.serialization.DefaultCallable` - Default value factory signature
+- :data:`~jangada.serialization.Observer` - Change observer signature
+- :data:`~jangada.serialization.Parser` - Value parser/validator signature
+- :data:`~jangada.serialization.Postinitializer` - Post-initializer signature
+
+
+Descriptor Protocol
+===================
+
+The descriptor protocol methods that define how SerializableProperty integrates
+with Python's attribute access mechanism.
 
 .. autosummary::
    :toctree: generated/
@@ -20,25 +36,29 @@ Descriptor Interface
    SerializableProperty.__delete__
 
 
-Configuration Helpers
-=====================
+Decorator Methods
+=================
+
+Methods for configuring property behavior using decorator syntax. These methods
+return new descriptor instances rather than modifying the existing one.
 
 .. autosummary::
    :toctree: generated/
 
-   SerializableProperty.deleter
+   SerializableProperty.postinitializer
    SerializableProperty.default
    SerializableProperty.parser
    SerializableProperty.add_observer
    SerializableProperty.remove_observer
 
 
-Properties
-==========
+Read-Only Properties
+====================
+
+Attributes that provide information about the descriptor's configuration.
 
 .. autosummary::
    :toctree: generated/
 
-   SerializableProperty.readonly
    SerializableProperty.writeonce
    SerializableProperty.copiable

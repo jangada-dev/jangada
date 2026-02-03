@@ -88,286 +88,457 @@ from numpy.typing import NDArray
 
 
 T = TypeVar('T')
-"""Represent the type of the property"""
+"""Type variable representing the type of the property value."""
 
-Getter: TypeAlias = Callable[[object], T]
-Setter: TypeAlias = Callable[[object, Any], None]
-Deleter: TypeAlias = Callable[[object], None]
+DefaultCallable: TypeAlias = Callable[[object], T]
+"""
+Callable that produces a default value for a property.
+
+Parameters
+----------
+instance : object
+    The instance for which to generate the default value.
+
+Returns
+-------
+T
+    The default value.
+"""
+
 Observer: TypeAlias = Callable[[object, T, T], None]
+"""
+Callable that observes property value changes.
+
+Parameters
+----------
+instance : object
+    The instance whose property changed.
+old_value : T
+    The previous value of the property.
+new_value : T
+    The new value of the property.
+
+Returns
+-------
+None
+"""
+
 Parser: TypeAlias = Callable[[object, Any], T]
+"""
+Callable that parses and validates property values.
+
+Parameters
+----------
+instance : object
+    The instance for which to parse the value.
+value : Any
+    The raw value to parse.
+
+Returns
+-------
+T
+    The parsed and validated value.
+"""
+
+Postinitializer: TypeAlias = Callable[[object], T]
+"""
+Callable that performs post-initialization setup.
+
+Parameters
+----------
+instance : object
+    The instance to initialize.
+
+Returns
+-------
+None
+"""
 
 
 class SerializableProperty:
     """
-    Descriptor representing a serializable attribute.
+     A descriptor for properties that support defaults, parsing, observation,
+     and post-initialization hooks.
 
-    ``SerializableProperty`` is a small descriptor used to declare an explicit
-    serialization schema for :class:`~jangada.serialization.Serializable`.
+     SerializableProperty provides a rich descriptor implementation designed for
+     scientific computing applications where properties need validation, change
+     tracking, lazy initialization, and eventual serialization to disk (e.g., HDF5).
 
-    Conceptually, it behaves like a constrained ``property``:
+     Features
+     --------
+     - **Default values**: Static or factory-generated defaults
+     - **Parsing/validation**: Transform and validate values before storage
+     - **Change observation**: Track value changes with callback functions
+     - **Post-initialization**: Run setup code after first property access
+     - **Write-once semantics**: Optionally prevent reassignment after first set
+     - **Serialization support**: Mark properties as copiable for persistence
 
-    - A *backing attribute* is created automatically (``private_name``) to store
-      the value on the instance.
-    - ``None`` is treated as a sentinel meaning “use the default” (if any).
-    - An optional *parser* may coerce/validate values before storage.
-    - A list of *observers* may be notified after each successful assignment.
-    - Flags define mutability and copy semantics.
+     Parameters
+     ----------
+     postinitializer : Postinitializer | None, optional
+         Function called once after the property is first set or accessed.
+         Receives the instance as its only argument. Useful for lazy setup
+         of related state or expensive initialization. Default is None.
+     default : T | DefaultCallable | None, optional
+         Default value for the property. Can be:
+         - A static value (used directly)
+         - A callable receiving the instance and returning the default
+         - None (property defaults to None)
+         Setting the property to None resets it to this default. Default is None.
+     parser : Parser | None, optional
+         Function to parse/validate values before storage. Receives the instance
+         and raw value, returns the parsed value. Applied to both explicitly set
+         values and defaults. Exceptions raised by the parser propagate to the
+         caller. Default is None.
+     observers : set[Observer] | None, optional
+         Set of functions called after the property value changes. Each observer
+         receives (instance, old_value, new_value). Observers are called after
+         parsing and storage, but before post-initialization. Default is None.
+     writeonce : bool, optional
+         If True, the property can only be set once (including initialization).
+         Subsequent sets raise AttributeError. Useful for immutable configuration.
+         Default is False.
+     copiable : bool, optional
+         Flag indicating whether this property should be included when copying
+         or serializing instances. Used by serialization systems to determine
+         which properties to persist. Default is True.
+     doc : str | None, optional
+         Documentation string for the property. Default is None.
 
-    Instances of this descriptor are discovered by
-    :class:`~jangada.serialization.SerializableMetatype` and collected into the
-    owning class' ``_serializable_properties`` mapping.
+     Attributes
+     ----------
+     name : str
+         Name of the property (set by __set_name__).
+     owner : type
+         Class that owns this descriptor (set by __set_name__).
+     private_name : str
+         Internal attribute name used to store the value on instances.
+     writeonce : bool
+         Whether the property is write-once (read-only after first set).
+     copiable : bool
+         Whether the property should be included in serialization.
 
-    Parameters
-    ----------
-    fdel : callable, optional
-        Deleter with signature ``fdel(instance) -> None``. If omitted, deleting
-        the attribute raises :class:`AttributeError`.
-    default : object or callable, optional
-        Default value used when assigning ``None`` (and, in some cases, when the
-        attribute has not yet been stored). If callable, it must have signature
-        ``default(instance) -> value``.
-    parser : callable, optional
-        Parser invoked before storage. Signature:
-        ``parser(instance, raw_value) -> parsed_value``.
-    observers : list of callable, optional
-        Observer callables invoked *after* a successful assignment, each with
-        signature ``observer(instance, old_value, new_value) -> None``.
-    readonly : bool, default False
-        If True, assignment via ``__set__`` is forbidden.
-    writeonce : bool, default False
-        If True, assignment is allowed only while the stored value is ``None``
-        (i.e., the first non-None stored value “locks” the property).
-    copiable : bool, default True
-        If True, participates in :class:`~jangada.serialization.Serializable`
-        copy and equality semantics.
-    doc : str, optional
-        Docstring exposed as ``__doc__`` for documentation tools.
+     Examples
+     --------
+     Basic usage with static default:
 
-    Attributes
-    ----------
-    name : str
-        Public attribute name on the owning class (set by ``__set_name__``).
-    private_name : str
-        Generated backing attribute name on instances (set by ``__set_name__``).
-    owner : type
-        Owning class (set by ``__set_name__``).
+     >>> class Experiment:
+     ...     temperature = SerializableProperty(default=293.15)
+     ...
+     >>> exp = Experiment()
+     >>> exp.temperature
+     293.15
+     >>> exp.temperature = 373.15
+     >>> exp.temperature
+     373.15
 
-    Notes
-    -----
-    **Default / None semantics**
-        The descriptor treats ``None`` as “unset / use default”. During
-        assignment, if the incoming value is ``None``, the default (or default
-        factory) is used instead.
+     Using a callable default for mutable objects:
 
-    **Getter/setter generation**
-        This implementation lazily installs ``fget``/``fset`` on first access /
-        assignment, using ``private_name`` as backing storage. This keeps the
-        object lightweight while preserving descriptor semantics.
+     >>> class DataContainer:
+     ...     data = SerializableProperty(default=lambda self: [])
+     ...
+     >>> c1 = DataContainer()
+     >>> c2 = DataContainer()
+     >>> c1.data.append(1)
+     >>> c2.data.append(2)
+     >>> c1.data
+     [1]
+     >>> c2.data
+     [2]
 
-    **Observer semantics**
-        Observers are invoked only by ``__set__`` (i.e., assignments). If a
-        value is materialized during ``__get__`` in *readonly* mode (missing
-        attribute → store default directly), observers are *not* called.
+     Using a parser for validation:
 
-    See Also
-    --------
-    Serializable
-    SerializableMetatype
-    Persistable
-    """
+     >>> class PositiveValue:
+     ...     value = SerializableProperty(
+     ...         default=1.0,
+     ...         parser=lambda self, v: max(0.0, float(v))
+     ...     )
+     ...
+     >>> obj = PositiveValue()
+     >>> obj.value = -5
+     >>> obj.value
+     0.0
+
+     Using decorators for cleaner syntax:
+
+     >>> class System:
+     ...     data = SerializableProperty()
+     ...
+     ...     @data.default
+     ...     def data(self):
+     ...         return {"initialized": True}
+     ...
+     ...     @data.parser
+     ...     def data(self, value):
+     ...         if not isinstance(value, dict):
+     ...             raise TypeError("data must be a dict")
+     ...         return value
+     ...
+     ...     @data.add_observer
+     ...     def data(self, old, new):
+     ...         print(f"Data changed from {old} to {new}")
+
+     Using post-initializer for lazy setup:
+
+     >>> class LazyLoader:
+     ...     data = SerializableProperty(default=None)
+     ...
+     ...     @data.postinitializer
+     ...     def data(self):
+     ...         print("Loading expensive data...")
+     ...         if self.data is None:
+     ...             self.data = list(range(1000))
+     ...
+     >>> loader = LazyLoader()
+     >>> # No output yet - not accessed
+     >>> _ = loader.data
+     Loading expensive data...
+     >>> len(loader.data)
+     1000
+
+     Write-once property for configuration:
+
+     >>> class Config:
+     ...     api_key = SerializableProperty(writeonce=True)
+     ...
+     >>> cfg = Config()
+     >>> cfg.api_key = "secret123"
+     >>> cfg.api_key = "different"  # Raises AttributeError
+     Traceback (most recent call last):
+         ...
+     AttributeError: api_key is a write-once property and has already been set
+
+     Notes
+     -----
+     - Properties are stored in instance.__dict__ with mangled names to avoid
+       conflicts with user attributes.
+     - Setting a property to None resets it to its default value.
+     - Observers are called on first access (with old_value=None) when the
+       property is initialized with its default.
+     - Post-initializers run after the first set completes, allowing them to
+       safely access the property value.
+     - Parsers are applied to default values as well as explicitly set values.
+     - All decorator methods (.default(), .parser(), etc.) return new descriptor
+       instances rather than mutating the existing one.
+     - Properties cannot be deleted (raises AttributeError).
+
+     See Also
+     --------
+     property : Python's built-in property descriptor
+     dataclasses.field : Similar concept for dataclasses
+     """
     # ========== ========== ========== ========== ========== class attributes
     ...
 
     # ========== ========== ========== ========== ========== special methods
     def __init__(self,
-                 fdel: Deleter | None = None,
-                 default: T | Getter | None = None,
+                 postinitializer: Postinitializer | None = None,
+                 default: T | DefaultCallable | None = None,
                  parser: Parser | None = None,
-                 observers: list[Observer] | None = None,
-                 readonly: bool = False,
+                 observers: set[Observer] | None = None,
                  writeonce: bool = False,
                  copiable: bool = True,
                  doc: str | None = None) -> None:
+        """
+        Initialize a SerializableProperty descriptor.
 
-        self.fdel: Deleter | None = fdel
-
-        self._default: T | Getter | None = default
+        Parameters
+        ----------
+        postinitializer : Postinitializer | None, optional
+            Post-initialization function.
+        default : T | DefaultCallable | None, optional
+            Default value or factory function.
+        parser : Parser | None, optional
+            Value parsing/validation function.
+        observers : set[Observer] | None, optional
+            Set of observer functions.
+        writeonce : bool, optional
+            Whether property can only be set once.
+        copiable : bool, optional
+            Whether property should be serialized.
+        doc : str | None, optional
+            Documentation string.
+        """
+        self._postinitializer: Postinitializer | None = postinitializer
+        self._default: T | DefaultCallable | None = default
         self._parser: Parser | None = parser
         self._observers: set[Observer] = set() if observers is None else observers
-
-        self._readonly: bool = readonly
         self._writeonce: bool = writeonce
         self._copiable: bool = copiable
 
-        if self.readonly and self.writeonce:
-            raise ValueError("Cannot be both readonly and writeonce")
+        self.__doc__: str | None = doc
 
-        self.__doc__: doc
-
+    # ---------- ---------- descriptor protocol
     def __set_name__(self, owner: type, name: str) -> None:
         """
-        Bind the descriptor to an owner class and attribute name.
+        Called when the descriptor is assigned to a class attribute.
 
-        This method is called automatically by Python during class creation.
-
-        It sets:
-
-        - ``self.name``: public attribute name
-        - ``self.owner``: owning class
-        - ``self.private_name``: generated instance backing attribute name
+        This method is part of the descriptor protocol and is automatically
+        called by Python when the class is created. It stores metadata about
+        the property's name and owner class.
 
         Parameters
         ----------
         owner : type
-            Class that owns this descriptor.
+            The class that contains this descriptor.
         name : str
-            Attribute name used on ``owner``.
+            The name of the attribute this descriptor is assigned to.
 
         Notes
         -----
-        The backing attribute name is generated as::
+        This method sets three attributes:
+        - name: The attribute name
+        - owner: The owning class
+        - private_name: Mangled name for storing the actual value
 
-            _serializable_property__<name>
-
-        This keeps storage private-ish and avoids collisions across unrelated
-        descriptors.
+        The private_name uses a prefix to avoid namespace collisions with
+        user-defined attributes.
         """
-
         self.name: str = name
         self.owner: type = owner
         self.private_name: str = f"_serializable_property__{name}"
 
     def __get__(self, instance: object|None, owner: type) -> T|Self:
         """
-        Retrieve the property value.
+        Get the property value from an instance.
+
+        This method implements the descriptor get protocol. When accessed from
+        the class, it returns the descriptor itself (for introspection). When
+        accessed from an instance, it returns the stored value, initializing
+        it with the default if this is the first access.
 
         Parameters
         ----------
-        instance : object or None
-            Instance from which the attribute is accessed. If None, access is
-            happening through the class and the descriptor itself is returned.
+        instance : object | None
+            The instance from which the property is accessed, or None if
+            accessed from the class.
         owner : type
-            Owner class (provided by the descriptor protocol).
+            The class that owns this descriptor.
 
         Returns
         -------
-        value : object or SerializableProperty
-            If accessed through the class (``instance is None``), returns this
-            descriptor. Otherwise returns the resolved value stored on the
-            instance (materializing a default when appropriate).
+        T | Self
+            If accessed from an instance, returns the property value (type T).
+            If accessed from the class, returns the descriptor itself (Self).
 
         Notes
         -----
-        On first instance access, a default getter (``fget``) is installed that:
+        On first access from an instance, this method:
+        1. Calls __set__(instance, None) to initialize with default
+        2. Returns the initialized value
+        3. This triggers observers and post-initializer on first access
 
-        - reads the backing attribute ``private_name`` if present
-        - if missing:
-          * in readonly mode: writes the default directly to the backing storage
-          * otherwise: delegates to ``__set__(..., None)`` to apply the normal
-            assignment pipeline (default, parser, observers)
-
-        This design ensures consistent behavior between “first read” and
-        “explicit assignment of None” for mutable properties.
+        Examples
+        --------
+        >>> class MyClass:
+        ...     prop = SerializableProperty(default=42)
+        ...
+        >>> MyClass.prop  # Access from class
+        <SerializableProperty object at 0x...>
+        >>> obj = MyClass()
+        >>> obj.prop  # Access from instance
+        42
         """
-
         if instance is None:
             # Accessing from class, return descriptor for introspection
             return self
 
-        if not hasattr(self, 'fget'):
+        try:
+            return instance.__getattribute__(self.private_name)
+        except AttributeError:
+            # if it reaches here, then property is being accessed for the first
+            # time and has never been set before
+            self.__set__(instance, None)
 
-            def getter(obj: object) -> Any:
-                try:
-                    return obj.__getattribute__(self.private_name)
-                except AttributeError:
-
-                    if self.readonly:
-                        if callable(self._default):
-                            value = self._default(instance)
-                        else:
-                            value = self._default
-
-                        setattr(obj, self.private_name, value)
-
-                    else:
-                        self.__set__(obj, None)
-
-                    return obj.__getattribute__(self.private_name)
-
-            self.fget = getter
-
-        return self.fget(instance)
+            return instance.__getattribute__(self.private_name)
 
     def __set__(self, instance: object, value: Any) -> None:
         """
-        Assign the property value.
+        Set the property value on an instance.
 
-        Assignment pipeline
-        -------------------
-        1. Enforce read-only (raises if ``readonly=True``).
-        2. Read the *currently stored* value (raw backing storage, may be missing).
-        3. Enforce write-once (raises if already stored as non-None).
-        4. Lazily install a default setter ``fset`` if needed.
-        5. Store the value via ``fset``:
-           - if incoming value is None, replace by default/default-factory
-           - if a parser exists, apply it
-           - write to ``private_name``
-        6. Notify observers with ``(instance, old_value, new_value)``.
+        This method implements the descriptor set protocol. It handles default
+        value resolution, parsing, write-once enforcement, observer notification,
+        and post-initialization.
 
         Parameters
         ----------
         instance : object
-            Object owning the property.
-        value : object
-            Value to assign. If None, default/default-factory is used.
+            The instance on which to set the property.
+        value : Any
+            The value to set. If None, the property is reset to its default.
 
         Raises
         ------
         AttributeError
-            If the property is read-only or violates write-once semantics.
+            If the property is write-once and has already been set.
+        Any exception raised by parser
+            Parser exceptions propagate to the caller.
 
         Notes
         -----
-        - ``old_value`` is the *raw stored value* prior to assignment (or None if
-          never stored).
-        - ``new_value`` is obtained via ``__get__`` after storing, which reflects
-          the post-parse stored value.
+        The set operation follows this sequence:
+        1. Check if this is the first time being set
+        2. Enforce write-once constraint if applicable
+        3. If value is None, resolve to default (static or from callable)
+        4. Apply parser if present (to both defaults and explicit values)
+        5. Store the parsed value in instance.__dict__
+        6. Call all observers with (instance, old_value, new_value)
+        7. If first set, call post-initializer if present
+
+        Setting to None always resets to the default value:
+
+        >>> class Example:
+        ...     value = SerializableProperty(default=10)
+        ...
+        >>> obj = Example()
+        >>> obj.value = 50
+        >>> obj.value
+        50
+        >>> obj.value = None  # Reset to default
+        >>> obj.value
+        10
+
+        Write-once enforcement:
+
+        >>> class Config:
+        ...     setting = SerializableProperty(writeonce=True)
+        ...
+        >>> cfg = Config()
+        >>> cfg.setting = "value1"
+        >>> cfg.setting = "value2"  # Raises AttributeError
+        Traceback (most recent call last):
+            ...
+        AttributeError: setting is a write-once property and has already been set
         """
-
-        if self.readonly:
-            raise AttributeError(f"can't set attribute '{self.name}' (read-only property)")
-
         # find the current value (if any)
+        # the property is considered unset if it is None or have never been set before
+
         try:
             current_value = instance.__getattribute__(self.private_name)
         except AttributeError:
-            # then it has not been set yet
+            # if it reaches here, then property is being set for the first time
             current_value = None
+            first_time = True
+        else:
+            first_time = False
 
         # ---------- ---------- ---------- ---------- handle write-once behavior
         if self.writeonce and current_value is not None:
             raise AttributeError(f"{self.name} is a write-once property and has already been set")
 
-        # ---------- ---------- ---------- ---------- set setter if it has not been set
-        if not hasattr(self, 'fset'):
+        # ---------- ---------- ---------- ---------- set value
+        if value is None:
+            # then the user is trying to reset the property to its default value
+            if callable(self._default):
+                value = self._default(instance)
+            else:
+                value = self._default
 
-            def setter(obj: object, value_: Any) -> None:
+        if self._parser is not None:
+            # the parser is applied to the default value as well
+            value = self._parser(instance, value)
 
-                if value_ is None:
-                    if callable(self._default):
-                        value_ = self._default(instance)
-                    else:
-                        value_ = self._default
-
-                if self._parser is not None:
-                    value_ = self._parser(instance, value_)
-
-                setattr(obj, self.private_name, value_)
-
-            self.fset = setter
-
-        # ---------- ---------- ---------- ---------- set new value
-        self.fset(instance, value)
+        setattr(instance, self.private_name, value)
 
         # ---------- ---------- ---------- ---------- call observers
         old_value = current_value
@@ -376,103 +547,162 @@ class SerializableProperty:
         for observer in self._observers:
             observer(instance, old_value, new_value)
 
+        # ---------- ---------- ---------- ---------- pos-initialization
+        if first_time and self._postinitializer is not None:
+            self._postinitializer(instance)
+
     def __delete__(self, instance: object) -> None:
         """
-        Delete the property value.
+        Prevent deletion of the property.
+
+        SerializableProperty instances cannot be deleted from instances.
+        This method always raises AttributeError.
 
         Parameters
         ----------
         instance : object
-            Object owning the property.
+            The instance from which deletion is attempted.
 
         Raises
         ------
         AttributeError
-            If no deleter is defined.
-        """
-        if self.fdel is None:
-            raise AttributeError(f"can't delete attribute '{self.name}'")
+            Always raised to prevent deletion.
 
-        self.fdel(instance)
-
-    # ========== ========== Descriptor protocol methods to work like @property
-    def deleter(self, fdel: Deleter) -> Self:
+        Examples
+        --------
+        >>> class MyClass:
+        ...     prop = SerializableProperty()
+        ...
+        >>> obj = MyClass()
+        >>> del obj.prop
+        Traceback (most recent call last):
+            ...
+        AttributeError: can't delete attribute 'prop'
         """
-        Return a new descriptor with the deleter replaced.
+        raise AttributeError(f"can't delete attribute '{self.name}'")
+
+    # ========== ========== decorators
+    def postinitializer(self, func: Postinitializer) -> Self:
+        """
+        Set a post-initialization function using decorator syntax.
+
+        The post-initializer is called once after the property is first set
+        or accessed. It receives the instance as its only argument and runs
+        after the value has been stored and observers have been called.
 
         Parameters
         ----------
-        fdel : callable
-            Deleter with signature ``fdel(instance)``.
+        func : Postinitializer
+            Function to call after first initialization. Should accept one
+            argument (the instance) and return None.
 
         Returns
         -------
-        SerializableProperty
-            New descriptor instance with identical configuration except for
-            the deleter.
+        Self
+            A new SerializableProperty instance with the initializer set.
 
         Notes
         -----
-        This follows the same ergonomic pattern as ``property.deleter``: you can
-        write::
+        This method creates a new descriptor instance rather than modifying
+        the existing one, following the immutable descriptor pattern.
 
-            x = SerializableProperty()
+        The post-initializer can safely:
+        - Access the property value (it's already set)
+        - Modify the property value (won't trigger another initialization)
+        - Set up related properties or state
+        - Perform expensive setup operations
 
-            @x.deleter
-            def x(self):
-                ...
-
-        to create a new configured descriptor object.
+        Examples
+        --------
+        >>> class DataLoader:
+        ...     data = SerializableProperty(default=None)
+        ...
+        ...     @data.postinitializer
+        ...     def data(self):
+        ...         print("Initializing data...")
+        ...         if self.data is None:
+        ...             self.data = load_expensive_data()
+        ...
+        >>> loader = DataLoader()
+        >>> # Post-initializer not yet called
+        >>> _ = loader.data  # First access triggers initialization
+        Initializing data...
         """
         return type(self)(
-            fdel=fdel,
+            postinitializer=func,
             default=self._default,
             parser=self._parser,
             observers=self._observers,
-            readonly=self._readonly,
             writeonce=self._writeonce,
             copiable=self._copiable,
             doc=self.__doc__
         )
 
-    # ---------- ---------- and more!!
-    def default(self, func: Getter) -> Self:
+    def default(self, func: DefaultCallable) -> Self:
         """
-        Return a new descriptor with the default factory replaced.
+        Set a default value factory using decorator syntax.
+
+        The default factory is called when the property needs a default value
+        (on first access or when explicitly set to None). It receives the
+        instance as its argument and should return the default value.
 
         Parameters
         ----------
-        func : callable
-            Default factory with signature ``func(instance) -> value``.
+        func : DefaultCallable
+            Function that generates default values. Should accept one argument
+            (the instance) and return the default value.
 
         Returns
         -------
-        SerializableProperty
-            New descriptor instance with identical configuration except for
-            the default factory.
+        Self
+            A new SerializableProperty instance with the default factory set.
 
         Notes
         -----
-        The default factory is used when assigning ``None`` and (for non-readonly
-        properties) may be used to materialize a value on first access.
+        This method creates a new descriptor instance rather than modifying
+        the existing one.
 
-        Example
-        -------
-        ::
+        Using a callable default is essential for mutable default values to
+        avoid sharing state between instances (similar to avoiding mutable
+        default arguments in function definitions).
 
-            class A(Serializable):
-                items = SerializableProperty()
+        Examples
+        --------
+        >>> class Container:
+        ...     items = SerializableProperty()
+        ...
+        ...     @items.default
+        ...     def items(self):
+        ...         return []  # New list for each instance
+        ...
+        >>> c1 = Container()
+        >>> c2 = Container()
+        >>> c1.items.append(1)
+        >>> c2.items.append(2)
+        >>> c1.items
+        [1]
+        >>> c2.items
+        [2]
 
-                @items.default
-                def items(self):
-                    return []
+        The default factory can access instance attributes:
+
+        >>> class Experiment:
+        ...     trial_number = SerializableProperty(default=1)
+        ...     data_file = SerializableProperty()
+        ...
+        ...     @data_file.default
+        ...     def data_file(self):
+        ...         return f"trial_{self.trial_number}.dat"
+        ...
+        >>> exp = Experiment()
+        >>> exp.data_file
+        'trial_1.dat'
         """
         return type(self)(
-            fdel=self.fdel,
+            postinitializer=self._postinitializer,
             default=func,
             parser=self._parser,
             observers=self._observers,
-            readonly=self._readonly,
             writeonce=self._writeonce,
             copiable=self._copiable,
             doc=self.__doc__
@@ -480,42 +710,87 @@ class SerializableProperty:
 
     def parser(self, func: Parser) -> Self:
         """
-        Return a new descriptor with the parser replaced.
+        Set a parser/validator function using decorator syntax.
+
+        The parser is called on every value set operation (including defaults)
+        to validate, transform, or normalize the value before storage.
 
         Parameters
         ----------
-        func : callable
-            Parser with signature ``parser(instance, raw_value) -> parsed_value``.
+        func : Parser
+            Function to parse values. Should accept two arguments (instance
+            and raw value) and return the parsed value.
 
         Returns
         -------
-        SerializableProperty
-            New descriptor instance with identical configuration except for
-            the parser.
+        Self
+            A new SerializableProperty instance with the parser set.
 
         Notes
         -----
-        The parser is applied during assignment *after* default expansion. A
-        parser may validate types, coerce containers, normalize inputs, or raise
-        exceptions on invalid values.
+        This method creates a new descriptor instance rather than modifying
+        the existing one.
 
-        Example
-        -------
-        ::
+        Parsers are applied to:
+        - Explicitly set values
+        - Default values (both static and from factories)
+        - Values set to None (after resolving to default)
 
-            class A(Serializable):
-                x = SerializableProperty()
+        If a parser raises an exception, it propagates to the caller and the
+        property value is not changed.
 
-                @x.parser
-                def x(self, value):
-                    return int(value)
+        Examples
+        --------
+        Type conversion:
+
+        >>> class TypedProperty:
+        ...     value = SerializableProperty()
+        ...
+        ...     @value.parser
+        ...     def value(self, val):
+        ...         return int(val)
+        ...
+        >>> obj = TypedProperty()
+        >>> obj.value = "123"
+        >>> obj.value
+        123
+        >>> type(obj.value)
+        <class 'int'>
+
+        Validation:
+
+        >>> class PositiveNumber:
+        ...     number = SerializableProperty(default=1)
+        ...
+        ...     @number.parser
+        ...     def number(self, val):
+        ...         val = float(val)
+        ...         if val <= 0:
+        ...             raise ValueError("Number must be positive")
+        ...         return val
+        ...
+        >>> obj = PositiveNumber()
+        >>> obj.number = 5
+        >>> obj.number = -1
+        Traceback (most recent call last):
+            ...
+        ValueError: Number must be positive
+
+        Normalization:
+
+        >>> class Path:
+        ...     directory = SerializableProperty()
+        ...
+        ...     @directory.parser
+        ...     def directory(self, val):
+        ...         import os
+        ...         return os.path.abspath(os.path.expanduser(val))
         """
         return type(self)(
-            fdel=self.fdel,
+            postinitializer=self._postinitializer,
             default=self._default,
             parser=func,
             observers=self._observers,
-            readonly=self._readonly,
             writeonce=self._writeonce,
             copiable=self._copiable,
             doc=self.__doc__
@@ -523,83 +798,207 @@ class SerializableProperty:
 
     def add_observer(self, func: Observer) -> Self:
         """
-        Register an observer callback.
+        Add an observer function using decorator syntax.
+
+        Observers are called after the property value changes. They receive
+        the instance, old value, and new value as arguments.
 
         Parameters
         ----------
-        func : callable
-            Observer with signature ``func(instance, old_value, new_value)``.
+        func : Observer
+            Function to observe changes. Should accept three arguments
+            (instance, old_value, new_value) and return None.
 
         Returns
         -------
-        SerializableProperty
-            Returns ``self`` to allow fluent usage.
+        Self
+            A new SerializableProperty instance with the observer added.
 
         Notes
         -----
-        Observers are invoked after every successful ``__set__`` call, in the
-        order they appear in the internal observer list.
+        This method creates a new descriptor instance with the observer added
+        to the set of observers.
 
-        This method mutates the descriptor in-place (unlike ``default()`` and
-        ``parser()`` which return new descriptors). This is intentional: observers
-        are typically added incrementally (e.g., by mixins or framework code).
+        Observers are called:
+        - After the value has been parsed and stored
+        - Before the post-initializer runs (if applicable)
+        - In arbitrary order if multiple observers exist
 
-        Example
-        -------
-        ::
+        On first access, observers receive old_value=None and new_value=default.
 
-            def on_change(obj, old, new):
-                ...
+        If an observer raises an exception, it propagates to the caller and
+        subsequent observers are not called.
 
-            MyClass.x.add_observer(on_change)
+        Examples
+        --------
+        Track changes:
+
+        >>> class Tracked:
+        ...     value = SerializableProperty(default=0)
+        ...
+        ...     @value.add_observer
+        ...     def value(self, old, new):
+        ...         print(f"Value changed: {old} -> {new}")
+        ...
+        >>> obj = Tracked()
+        >>> obj.value = 10
+        Value changed: 0 -> 10
+        >>> obj.value = 20
+        Value changed: 10 -> 20
+
+        Update dependent properties:
+
+        >>> class Rectangle:
+        ...     width = SerializableProperty(default=1.0)
+        ...     height = SerializableProperty(default=1.0)
+        ...     area = SerializableProperty(default=1.0)
+        ...
+        ...     @width.add_observer
+        ...     def width(self, old, new):
+        ...         self.area = self.width * self.height
+        ...
+        ...     @height.add_observer
+        ...     def height(self, old, new):
+        ...         self.area = self.width * self.height
+        ...
+        >>> rect = Rectangle()
+        >>> rect.width = 5
+        >>> rect.height = 3
+        >>> rect.area
+        15.0
+
+        Multiple observers:
+
+        >>> class MultiObserved:
+        ...     value = SerializableProperty()
+        ...
+        ...     @value.add_observer
+        ...     def value(self, old, new):
+        ...         print(f"Observer 1: {old} -> {new}")
+        ...
+        >>> # Can chain add_observer calls
+        >>> MultiObserved.value = MultiObserved.value.add_observer(
+        ...     lambda self, old, new: print(f"Observer 2: {old} -> {new}")
+        ... )
         """
-        self._observers.add(func)
-        return self
+        return type(self)(
+            postinitializer=self._postinitializer,
+            default=self._default,
+            parser=self._parser,
+            observers=self._observers | {func},
+            writeonce=self._writeonce,
+            copiable=self._copiable,
+            doc=self.__doc__
+        )
 
     def remove_observer(self, func: Observer) -> Self:
         """
-        Unregister a previously registered observer callback.
+        Remove an observer function.
+
+        Creates a new descriptor instance without the specified observer.
 
         Parameters
         ----------
-        func : callable
-            Observer function previously passed to :meth:`add_observer`.
+        func : Observer
+            The observer function to remove.
 
         Returns
         -------
-        SerializableProperty
-            Returns ``self`` to allow fluent usage.
+        Self
+            A new SerializableProperty instance with the observer removed.
 
         Raises
         ------
-        ValueError
-            If the observer is not currently registered.
+        KeyError
+            If the observer is not in the set of observers.
+
+        Notes
+        -----
+        This method creates a new descriptor instance rather than modifying
+        the existing one.
+
+        Examples
+        --------
+        >>> def my_observer(instance, old, new):
+        ...     print(f"Changed: {old} -> {new}")
+        ...
+        >>> class MyClass:
+        ...     value = SerializableProperty(observers={my_observer})
+        ...
+        >>> # Remove the observer
+        >>> MyClass.value = MyClass.value.remove_observer(my_observer)
         """
-        self._observers.remove(func)
-        return self
+        return type(self)(
+            postinitializer=self._postinitializer,
+            default=self._default,
+            parser=self._parser,
+            observers=self._observers - {func},
+            writeonce=self._writeonce,
+            copiable=self._copiable,
+            doc=self.__doc__
+        )
 
     # ========== ========== ========== ========== ========== properties
     @property
-    def readonly(self) -> bool:
-        """
-        bool
-            True if the property is read-only (no setter).
-        """
-        return self._readonly
-
-    @property
     def writeonce(self) -> bool:
         """
+        Whether this property can only be set once.
+
+        Returns
+        -------
         bool
-            True if the property is write-once.
+            True if the property is write-once, False otherwise.
+
+        Notes
+        -----
+        This is a read-only property of the descriptor. The write-once flag
+        is set during descriptor creation and cannot be changed afterward.
+
+        Examples
+        --------
+        >>> class MyClass:
+        ...     immutable = SerializableProperty(writeonce=True)
+        ...     mutable = SerializableProperty(writeonce=False)
+        ...
+        >>> MyClass.immutable.writeonce
+        True
+        >>> MyClass.mutable.writeonce
+        False
         """
         return self._writeonce
 
     @property
     def copiable(self) -> bool:
         """
+        Whether this property should be included in serialization.
+
+        Returns
+        -------
         bool
-            True if the property participates in copy/equality semantics.
+            True if the property should be serialized, False otherwise.
+
+        Notes
+        -----
+        This flag is used by serialization systems to determine which properties
+        to include when persisting instances to disk (e.g., HDF5 files).
+
+        Properties marked as non-copiable (copiable=False) are typically:
+        - Cached/derived values that can be recomputed
+        - Temporary state not needed after deserialization
+        - References to external resources (file handles, network connections)
+
+        This is a read-only property of the descriptor.
+
+        Examples
+        --------
+        >>> class System:
+        ...     data = SerializableProperty(copiable=True)
+        ...     cache = SerializableProperty(copiable=False)
+        ...
+        >>> System.data.copiable
+        True
+        >>> System.cache.copiable
+        False
         """
         return self._copiable
 

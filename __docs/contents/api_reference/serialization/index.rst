@@ -18,6 +18,8 @@ Serialization (``jangada.serialization``)
     ProxyDataset
     SerializableMetatype
 
+    type_aliases
+
 
 ========
 Entities
@@ -31,6 +33,7 @@ Entities
     ProxyDataset
     SerializableMetatype
 
+    type_aliases
 
 
 
