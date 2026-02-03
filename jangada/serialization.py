@@ -2297,6 +2297,7 @@ Serializable.register_primitive_type(str)
 Serializable.register_primitive_type(Number)
 Serializable.register_primitive_type(Path)
 
+
 # ========== ========== ========== Register ndarray as dataset_type
 def disassemble_ndarray(arr: NDArray) -> tuple[NDArray, dict[str]]:
     """
@@ -2417,24 +2418,302 @@ Serializable.register_dataset_type(pandas.DatetimeIndex,
 
 # ========== ========== ========== ========== ========== ==========
 class Persistable(Serializable):
+    """
+    Base class for objects that can be persisted to HDF5 files.
 
+    Persistable extends Serializable to provide HDF5 file I/O, supporting both
+    full object loading and lazy access via context managers. The HDF5 backend
+    enables efficient storage of large arrays, hierarchical data structures,
+    and metadata.
+
+    Class Attributes
+    ----------------
+    extension : str
+        Default file extension for saved files. Default is '.hdf5'.
+
+    Features
+    --------
+    - **Full loading**: Load entire object into memory
+    - **Lazy loading**: Access data on-demand via ProxyDataset
+    - **Context manager**: Interactive file access for reading/writing
+    - **Resizable datasets**: Append to arrays without rewriting entire file
+    - **Automatic type mapping**: Handles primitives, arrays, collections, and nested objects
+    - **Metadata preservation**: Stores class information for accurate reconstruction
+
+    Construction Modes
+    ------------------
+    Persistable supports three initialization modes:
+
+    1. **Normal construction** (like Serializable)::
+
+        obj = MyClass(prop1=value1, prop2=value2)
+
+    2. **Load from file**::
+
+        obj = MyClass('/path/to/file.hdf5')
+
+    3. **Open for context manager**::
+
+        with MyClass('/path/to/file.hdf5', mode='r+') as obj:
+            # Access with ProxyDataset
+            obj.data[10:20]
+
+    Parameters
+    ----------
+    *args : tuple
+        Variable positional arguments:
+        - No args: Normal Serializable construction
+        - Single Path/str: Load from file
+        - Single Path/str + kwargs: Prepare for context manager
+    **kwargs : dict
+        For normal construction: property values
+        For context manager: must include 'mode' parameter
+
+    Raises
+    ------
+    ValueError
+        If kwargs are provided with filepath but 'mode' is missing, or if
+        unknown kwargs are provided.
+    FileNotFoundError
+        If loading from a non-existent file.
+
+    Examples
+    --------
+    Define a Persistable class::
+
+        class Experiment(Persistable):
+            name = SerializableProperty(default="")
+            temperature = SerializableProperty(default=293.15)
+            data = SerializableProperty(default=None)
+
+    Normal construction and saving::
+
+        exp = Experiment(name="Test1", temperature=373.15)
+        exp.save('experiment.hdf5')
+
+    Load from file::
+
+        exp = Experiment.load('experiment.hdf5')
+        print(exp.name)  # 'Test1'
+
+    Or use constructor::
+
+        exp = Experiment('experiment.hdf5')
+        print(exp.name)  # 'Test1'
+
+    Context manager for lazy loading::
+
+        with Experiment('experiment.hdf5', mode='r') as exp:
+            # data is ProxyDataset - not loaded until accessed
+            chunk = exp.data[100:200]
+
+    Append data efficiently::
+
+        with Experiment('experiment.hdf5', mode='r+') as exp:
+            exp.data.append(np.array([new, values]))
+
+    Nested objects work automatically::
+
+        class Trial(Persistable):
+            trial_num = SerializableProperty(default=0)
+            experiment = SerializableProperty(default=None)
+
+        trial = Trial(trial_num=1, experiment=exp)
+        trial.save('trial.hdf5')
+
+    Notes
+    -----
+    HDF5 File Structure
+    ^^^^^^^^^^^^^^^^^^^
+    Files are organized as::
+
+        file.hdf5
+        └── root (group)
+            ├── __class__ (attribute)
+            ├── property1 (attribute or dataset)
+            ├── property2 (group for lists/dicts)
+            │   ├── __container_type__ (attribute)
+            │   └── ... (items)
+            └── property3 (dataset for arrays)
+                ├── __dataset_type__ (attribute)
+                └── ... (metadata attributes)
+
+    Type Mapping
+    ^^^^^^^^^^^^
+    - **None**: Stored as string 'NoneType:None' in attributes
+    - **str, Number**: Stored directly in attributes
+    - **Path**: Stored as 'Path:/absolute/path' in attributes
+    - **list, dict**: Stored as groups with __container_type__ attribute
+    - **numpy arrays, pandas timestamps**: Stored as datasets with __dataset_type__
+    - **Nested Serializable**: Stored recursively as groups
+
+    ProxyDataset
+    ^^^^^^^^^^^^
+    In context manager mode, array properties become ProxyDataset instances
+    that load data on-demand. This enables efficient access to large files
+    without loading everything into memory.
+
+    Performance
+    ^^^^^^^^^^^
+    - Use context manager mode for large arrays
+    - Append operations are efficient (no full rewrite)
+    - First dimension of datasets is resizable
+    - Consider HDF5 chunking for specific access patterns
+
+    See Also
+    --------
+    Serializable : Parent class for serialization
+    ProxyDataset : Lazy loading wrapper for HDF5 datasets
+    SerializableProperty : Property descriptor
+    """
     # ========== ========== ========== ========== ========== class attributes
     extension: str = '.hdf5'
+    """Default file extension for saved files."""
 
     class ProxyDataset:
+        """
+        Lazy-loading wrapper for HDF5 datasets.
+
+        ProxyDataset provides array-like access to HDF5 datasets without loading
+        the entire dataset into memory. It supports slicing, indexing, and
+        modification operations, delegating to the underlying HDF5 dataset.
+
+        This class is automatically used when opening Persistable objects in
+        context manager mode. It enables efficient access to large arrays that
+        would be impractical to load fully.
+
+        Attributes
+        ----------
+        _dataset : h5py.Dataset
+            The underlying HDF5 dataset.
+        _attrs : dict
+            Cached dataset attributes (metadata).
+        _dataset_type_name : str
+            Fully qualified name of the dataset type.
+
+        Examples
+        --------
+        Accessing data lazily::
+
+            with Experiment('data.hdf5', mode='r') as exp:
+                # exp.data is a ProxyDataset
+                print(exp.data.shape)  # (1000000,) - not loaded yet
+
+                # Load only what you need
+                chunk = exp.data[100:200]  # Loads only 100 elements
+
+        Modifying data::
+
+            with Experiment('data.hdf5', mode='r+') as exp:
+                exp.data[50] = 99  # Modify single element
+                exp.data[10:20] = new_values  # Modify slice
+
+        Appending data::
+
+            with Experiment('data.hdf5', mode='r+') as exp:
+                exp.data.append(np.array([new, data]))
+
+        Notes
+        -----
+        ProxyDataset does not implement the full NumPy array API. It provides:
+
+        Supported:
+            - Slicing and indexing (``__getitem__``, ``__setitem__``)
+            - Shape, dtype, ndim, size, nbytes properties
+            - Append operation
+            - Automatic resizing on out-of-bounds assignment
+
+        Not supported:
+            - Arithmetic operations (``+``, ``-``, ``*``, etc.)
+            - Iteration (``__iter__``)
+            - Length (``__len__``)
+            - Universal functions (ufuncs)
+
+        For full array operations, load the data explicitly::
+
+            data_array = exp.data[:]  # Load entire dataset
+            result = data_array * 2   # Now can use numpy operations
+
+        See Also
+        --------
+        Persistable : Parent class that creates ProxyDatasets
+        """
 
         def __init__(self, dataset: h5py.Dataset) -> None:
+            """
+            Initialize a ProxyDataset wrapper.
+
+            Parameters
+            ----------
+            dataset : h5py.Dataset
+                The HDF5 dataset to wrap.
+
+            Notes
+            -----
+            This constructor is called automatically by Persistable when opening
+            files in context manager mode. Users typically don't instantiate
+            ProxyDataset directly.
+            """
             self._dataset = dataset
             self._attrs = {k: Persistable._load_data_from_h5py_tree(v) for k, v in self._dataset.attrs.items()}
             self._dataset_type_name = self._attrs.pop('__dataset_type__')
 
         def __getitem__(self, item) -> Any:
+            """
+            Get data from the dataset using slicing or indexing.
+
+            Parameters
+            ----------
+            item : int, slice, tuple
+                Index or slice specification.
+
+            Returns
+            -------
+            Any
+                The requested data, assembled using the dataset type's
+                assemble function.
+
+            Examples
+            --------
+            >>> proxy[10]      # Single element
+            >>> proxy[10:20]   # Slice
+            >>> proxy[5, :]    # Multidimensional indexing
+            """
             assemble = Serializable._dataset_types[self._dataset_type_name]['assemble']
             array = self._dataset[item]
 
             return assemble(array, self.attrs)
 
         def __setitem__(self, key, value) -> None:
+            """
+            Set data in the dataset using slicing or indexing.
+
+            Automatically resizes the dataset if the key is beyond current bounds.
+            The dataset can only be resized along the first dimension.
+
+            Parameters
+            ----------
+            key : int, slice, tuple
+                Index or slice specification.
+            value : Any
+                Value to set. Must be compatible with the dataset type.
+
+            Raises
+            ------
+            AssertionError
+                If the value's metadata doesn't match the dataset's metadata.
+
+            Examples
+            --------
+            >>> proxy[10] = 99
+            >>> proxy[10:20] = new_array
+            >>> proxy[1000] = value  # Auto-resizes if beyond current size
+
+            Notes
+            -----
+            Auto-resizing only works for the first dimension. Multidimensional
+            datasets can only be extended along axis 0.
+            """
             # this code block is meant to test if key is inside the dataset limits,
             # otherwise resizing it. This is actually pretty experimental, but passed
             # in the proposed tests
@@ -2453,6 +2732,48 @@ class Persistable(Serializable):
             self._dataset[key] = arr
 
         def append(self, value: Any) -> None:
+            """
+            Append data to the end of the dataset.
+
+            Efficiently adds new data by resizing the dataset and writing only
+            the new values. Much faster than loading, concatenating, and saving.
+
+            Parameters
+            ----------
+            value : Any
+                Data to append. Must be compatible with the dataset type.
+                For 1D datasets, can be a single value or array.
+                For nD datasets, first dimension is extended.
+
+            Raises
+            ------
+            AssertionError
+                If the value's metadata doesn't match the dataset's metadata.
+
+            Examples
+            --------
+            Append to time series::
+
+                with TimeSeries('data.hdf5', mode='r+') as ts:
+                    ts.data.append(np.array([new, values]))
+
+            Incremental data collection::
+
+                with Experiment('exp.hdf5', mode='r+') as exp:
+                    for measurement in new_measurements:
+                        exp.readings.append(measurement)
+
+            Notes
+            -----
+            The append operation:
+            1. Disassembles the value to array + metadata
+            2. Validates metadata matches existing dataset
+            3. Resizes dataset to accommodate new data
+            4. Writes only the new data (efficient)
+
+            For scalar datasets (ndim=0), append is not supported as they
+            cannot be resized.
+            """
             disassemble = Serializable._dataset_types[self._dataset_type_name]['disassemble']
             arr, attrs = disassemble(value)
             assert attrs == self.attrs
@@ -2466,31 +2787,165 @@ class Persistable(Serializable):
 
         @property
         def attrs(self) -> dict:
+            """
+            Get dataset metadata attributes.
+
+            Returns
+            -------
+            dict
+                Copy of the dataset's metadata attributes.
+
+            Notes
+            -----
+            Returns a copy to prevent accidental modification. The __dataset_type__
+            attribute is excluded as it's used internally.
+
+            Examples
+            --------
+            >>> proxy.attrs
+            {'timezone': 'UTC', 'units': 'kelvin'}
+            """
             return self._attrs.copy()
 
         # ---------- ---------- ---------- ---------- ---------- ----------
         @property
         def shape(self) -> tuple[int]:
+            """
+            Get the shape of the dataset.
+
+            Returns
+            -------
+            tuple[int, ...]
+                Dataset dimensions.
+
+            Examples
+            --------
+            >>> proxy.shape
+            (1000, 100, 10)
+            """
             return self._dataset.shape
 
         @property
         def size(self) -> int:
+            """
+            Get the total number of elements in the dataset.
+
+            Returns
+            -------
+            int
+                Total number of elements (product of shape).
+
+            Examples
+            --------
+            >>> proxy.shape
+            (100, 10)
+            >>> proxy.size
+            1000
+            """
             return self._dataset.size
 
         @property
         def dtype(self) -> numpy.dtype:
+            """
+            Get the data type of the dataset.
+
+            Returns
+            -------
+            numpy.dtype
+                The dtype of the dataset elements.
+
+            Examples
+            --------
+            >>> proxy.dtype
+            dtype('float64')
+            """
             return self._dataset.dtype
 
         @property
         def ndim(self) -> int:
+            """
+            Get the number of dimensions.
+
+            Returns
+            -------
+            int
+                Number of dimensions.
+
+            Examples
+            --------
+            >>> proxy.ndim
+            3
+            """
             return self._dataset.ndim
 
         @property
         def nbytes(self) -> int:
+            """
+            Get the total bytes consumed by the dataset elements.
+
+            Returns
+            -------
+            int
+                Total bytes (size * dtype.itemsize).
+
+            Examples
+            --------
+            >>> proxy.nbytes
+            80000  # 10000 elements * 8 bytes per float64
+            """
             return self._dataset.nbytes
 
     # ========== ========== ========== ========== ========== special methods
     def __init__(self, *args, **kwargs) -> None:
+        """
+        Initialize a Persistable object.
+
+        Supports three modes based on arguments:
+
+        1. Normal construction: ``obj = MyClass(prop1=val1)``
+        2. Load from file: ``obj = MyClass('/path/file.hdf5')``
+        3. Context manager prep: ``obj = MyClass('/path/file.hdf5', mode='r')``
+
+        Parameters
+        ----------
+        *args : tuple
+            If empty: normal Serializable construction with kwargs
+            If single Path/str: load from that file
+            If single Path/str with kwargs: prepare for context manager
+        **kwargs : dict
+            For mode 1: property values
+            For mode 3: must include 'mode' parameter (HDF5 file mode)
+
+        Raises
+        ------
+        ValueError
+            If unknown kwargs are provided in context manager mode.
+        FileNotFoundError
+            If loading from non-existent file.
+
+        Examples
+        --------
+        Normal construction::
+
+            exp = Experiment(name="Test", temperature=300.0)
+
+        Load from file::
+
+            exp = Experiment('data.hdf5')
+
+        Prepare for context manager::
+
+            exp = Experiment('data.hdf5', mode='r+')
+            with exp as e:
+                # Use e
+                pass
+
+        Or directly::
+
+            with Experiment('data.hdf5', mode='r+') as exp:
+                # Use exp
+                pass
+        """
         if args and isinstance(args[0], (str, Path)):
 
             filepath = Path(args[0])
@@ -2512,6 +2967,29 @@ class Persistable(Serializable):
             super().__init__(*args, **kwargs)
 
     def __enter__(self) -> Persistable:
+        """
+        Enter context manager mode.
+
+        Opens the HDF5 file and loads data with ProxyDataset wrappers for
+        array properties, enabling lazy loading.
+
+        Returns
+        -------
+        Persistable
+            Self, with properties loaded (arrays as ProxyDataset).
+
+        Notes
+        -----
+        The file remains open until __exit__ is called. All array properties
+        become ProxyDataset instances, allowing efficient access to large
+        datasets without loading them fully into memory.
+
+        Examples
+        --------
+        >>> with Experiment('data.hdf5', mode='r') as exp:
+        ...     # File is open, exp.data is ProxyDataset
+        ...     chunk = exp.data[100:200]
+        """
         self.__file = h5py.File(self._path, mode=self._mode)
 
         data = type(self)._load_data_from_h5py_tree(self.__file['root'], use_proxy_dataset=True)
@@ -2521,6 +2999,24 @@ class Persistable(Serializable):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """
+        Exit context manager mode.
+
+        Closes the HDF5 file.
+
+        Parameters
+        ----------
+        exc_type : type or None
+            Exception type if an exception occurred.
+        exc_val : Exception or None
+            Exception instance if an exception occurred.
+        exc_tb : traceback or None
+            Traceback if an exception occurred.
+
+        Notes
+        -----
+        The file is closed regardless of whether an exception occurred.
+        """
         self.__file.close()
 
     # ========== ========== ========== ========== ========== private methods
@@ -2529,6 +3025,40 @@ class Persistable(Serializable):
     # ========== ========== ========== ========== ========== protected methods
     @staticmethod
     def _save_data_in_group(key: str, value: Any, group: h5py.Group) -> None:
+        """
+        Recursively save data to an HDF5 group.
+
+        This method handles the conversion of Python objects to HDF5 structures,
+        mapping different types to appropriate HDF5 storage (attributes, datasets,
+        or subgroups).
+
+        Parameters
+        ----------
+        key : str
+            The name/key for this data in the HDF5 group.
+        value : Any
+            The value to save.
+        group : h5py.Group
+            The HDF5 group to save into.
+
+        Raises
+        ------
+        TypeError
+            If the value type is not supported for HDF5 storage.
+
+        Notes
+        -----
+        Type mapping:
+        - None → attribute: 'NoneType:None'
+        - Path → attribute: 'Path:/absolute/path'
+        - str/Number → attribute: direct storage
+        - list → subgroup with __container_type__ = 'list'
+        - dict → subgroup with __container_type__ = 'dict'
+        - dataset types → HDF5 dataset with __dataset_type__ attribute
+
+        Datasets are created with resizable first dimension (maxshape=(None, ...))
+        to support appending, except for scalar datasets which cannot be resized.
+        """
         if value is None:
             group.attrs[key] = 'NoneType:None'
 
@@ -2575,6 +3105,39 @@ class Persistable(Serializable):
 
     @staticmethod
     def _load_data_from_h5py_tree(value: Any, use_proxy_dataset: bool = False) -> Any:
+        """
+        Recursively load data from HDF5 structure.
+
+        Reconstructs Python objects from HDF5 groups, datasets, and attributes.
+
+        Parameters
+        ----------
+        value : Any
+            HDF5 object to load (Group, Dataset, or attribute value).
+        use_proxy_dataset : bool, optional
+            If True, wrap datasets in ProxyDataset for lazy loading.
+            If False, load datasets fully. Default is False.
+
+        Returns
+        -------
+        Any
+            Reconstructed Python object.
+
+        Raises
+        ------
+        ValueError
+            If __container_type__ has an unknown value.
+
+        Notes
+        -----
+        This method reverses the mapping from _save_data_in_group:
+        - 'NoneType:None' → None
+        - 'Path:...' → Path object
+        - Groups with __container_type__ → list or dict
+        - Datasets → numpy arrays, pandas objects, etc. (or ProxyDataset)
+
+        The use_proxy_dataset flag enables lazy loading for context manager mode.
+        """
         if isinstance(value, h5py.Group):
 
             data = {k: Persistable._load_data_from_h5py_tree(v, use_proxy_dataset=use_proxy_dataset) for k, v in value.items()}
@@ -2623,11 +3186,67 @@ class Persistable(Serializable):
 
     # ========== ========== ========== ========== ========== public methods
     def save_serialized_data(self, path: Path|str, data: Any) -> None:
+        """
+        Save serialized data dictionary to HDF5 file.
+
+        This is a low-level method that writes a data dictionary (from
+        Serializable.serialize) to an HDF5 file.
+
+        Parameters
+        ----------
+        path : Path | str
+            File path to save to.
+        data : Any
+            Serialized data (typically from Serializable.serialize).
+
+        Notes
+        -----
+        This method is called internally by save(). Users typically use
+        save() instead of calling this directly.
+
+        Creates an HDF5 file with a 'root' group containing all the data.
+
+        See Also
+        --------
+        save : High-level save method
+        load_serialized_data : Load counterpart
+        """
         with h5py.File(Path(path), 'w') as file:
             self._save_data_in_group('root', data, file)
 
     @classmethod
     def load_serialized_data(cls, path: Path|str) -> Any:
+        """
+        Load serialized data dictionary from HDF5 file.
+
+        This is a low-level method that reads an HDF5 file and returns
+        the data dictionary (which can be passed to Serializable.deserialize).
+
+        Parameters
+        ----------
+        path : Path | str
+            File path to load from.
+
+        Returns
+        -------
+        Any
+            Deserialized data dictionary.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the file does not exist.
+
+        Notes
+        -----
+        This method is called internally by load(). Users typically use
+        load() instead of calling this directly.
+
+        See Also
+        --------
+        load : High-level load method
+        save_serialized_data : Save counterpart
+        """
         path = Path(path)
 
         if not path.is_file():
@@ -2642,6 +3261,55 @@ class Persistable(Serializable):
              path: Path | str,
              overwrite: bool = True,
              use_default_extension: bool = True) -> None:
+        """
+        Save this object to an HDF5 file.
+
+        Parameters
+        ----------
+        path : Path | str
+            File path to save to.
+        overwrite : bool, optional
+            If True, overwrite existing file. If False, raise FileExistsError
+            if file exists. Default is True.
+        use_default_extension : bool, optional
+            If True, add the class's default extension if not present.
+            Default is True.
+
+        Raises
+        ------
+        FileExistsError
+            If file exists and overwrite=False.
+
+        Examples
+        --------
+        Basic save::
+
+            exp = Experiment(name="Test", temperature=300.0)
+            exp.save('experiment.hdf5')
+
+        Save without overwriting::
+
+            exp.save('experiment.hdf5', overwrite=False)
+
+        Save with custom extension::
+
+            exp.save('data.h5', use_default_extension=False)
+
+        Notes
+        -----
+        The save process:
+        1. Resolves path (adds extension if needed)
+        2. Checks if file exists (if overwrite=False)
+        3. Serializes object to dictionary
+        4. Writes dictionary to HDF5 file
+
+        The entire object is serialized, so this may be slow for very large
+        objects. For incremental updates, use context manager mode.
+
+        See Also
+        --------
+        load : Load counterpart
+        """
         # ---------- ---------- resolve path
         path = Path(path)
 
@@ -2657,6 +3325,43 @@ class Persistable(Serializable):
 
     @classmethod
     def load(cls, path: Path|str) -> Persistable:
+        """
+        Load an object from an HDF5 file.
+
+        Parameters
+        ----------
+        path : Path | str
+            File path to load from.
+
+        Returns
+        -------
+        Persistable
+            Reconstructed object.
+
+        Raises
+        ------
+        FileNotFoundError
+            If file does not exist.
+
+        Examples
+        --------
+        >>> exp = Experiment.load('experiment.hdf5')
+        >>> print(exp.name)
+        'Test'
+
+        Notes
+        -----
+        The entire file is loaded into memory. For large files, consider
+        using context manager mode for lazy loading::
+
+            with Experiment('large_file.hdf5', mode='r') as exp:
+                # Access data on-demand
+                chunk = exp.data[100:200]
+
+        See Also
+        --------
+        save : Save counterpart
+        """
         data = cls.load_serialized_data(path)
         return Serializable.deserialize(data)
 
@@ -2668,7 +3373,26 @@ Serializable.register_primitive_type(Persistable.ProxyDataset)
 
 
 load = Persistable.load
+"""
+Module-level convenience function for loading Persistable objects.
 
+Equivalent to ``Persistable.load(path)``.
+
+Parameters
+----------
+path : Path | str
+    File path to load from.
+
+Returns
+-------
+Persistable
+    Loaded object.
+
+Examples
+--------
+>>> from jangada.serialization import load
+>>> exp = load('experiment.hdf5')
+"""
 
 __all__ = [
     'SerializableProperty',
