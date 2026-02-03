@@ -2369,11 +2369,10 @@ def disassemble_pandas_time(time: pandas.DatetimeIndex | pandas.Timestamp) -> tu
     with the timezone string saved in attributes for reconstruction.
     """
     if time.tz is None:
-        time_array = time.to_numpy().astype(numpy.int64)
+        time_array = time.to_numpy().astype('datetime64[ns]').astype(numpy.int64)
         timezone = None
-
     else:
-        time_array = time.tz_localize(None).to_numpy().astype(numpy.int64)
+        time_array = time.tz_localize(None).to_numpy().astype('datetime64[ns]').astype(numpy.int64)
         timezone = str(time.tz)
 
     return time_array, {'timezone': timezone}
@@ -2398,7 +2397,7 @@ def assemble_pandas_time(time_array: NDArray, time_attrs: dict[str]) -> pandas.D
     pd.DatetimeIndex | pd.Timestamp
         Reconstructed datetime object with timezone if applicable.
     """
-    time = pandas.to_datetime(time_array)
+    time = pandas.to_datetime(time_array.astype('datetime64[ns]'))
     tz = time_attrs.pop('timezone')
 
     if tz is not None:
