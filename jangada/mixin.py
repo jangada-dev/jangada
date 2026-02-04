@@ -100,8 +100,9 @@ TagNamespace
 from __future__ import annotations
 
 import keyword
-import weakref
 import uuid
+
+from weakref import WeakValueDictionary
 
 from matplotlib.colors import to_hex
 
@@ -114,153 +115,151 @@ from typing import Any
 # ========== ========== ========== ========== ========== Identifiable
 class Identifiable:
     """
-    Mixin class for objects with unique identifiers.
+    Mixin that adds a globally unique, write-once UUID identifier.
 
-    Provides automatic UUID v4 generation and management for objects that
-    require unique identification. IDs are write-once (immutable after first
-    assignment), not copied when copying objects, and tracked in a global
-    registry for instance lookup.
+    Provides each instance with a unique ID that cannot be changed after
+    initialization. Instances are tracked in a weak-reference registry,
+    allowing lookup by ID while permitting garbage collection.
 
-    The ID is lazily generated on first access - objects don't receive an ID
-    until the `id` property is accessed or explicitly set. All instances are
-    tracked in a weak reference registry to enable lookup by ID without
-    preventing garbage collection.
+    The ID is a UUID v4 (randomly generated) stored as a 32-character
+    hexadecimal string. It is not included when copying objects (copiable=False).
 
     Attributes
     ----------
     id : str
-        Unique identifier as a 32-character hexadecimal UUID v4 string.
-        Automatically generated on first access if not explicitly set.
-        Write-once: cannot be modified after initial assignment.
-        Not copied: each copy receives a new ID.
+        A unique 32-character hexadecimal UUID v4 identifier. Write-once,
+        auto-generated if not provided, and not copied.
+
+    Class Attributes
+    ----------------
+    _instances : WeakValueDictionary[str, Identifiable]
+        Global registry of instances indexed by ID. Uses weak references
+        to allow garbage collection.
 
     Examples
     --------
-    Basic usage with automatic ID generation:
+    Basic usage::
 
-    >>> obj = Identifiable()
-    >>> obj.id
-    '02248d1fd3c14f3aa16cb1eb61d0d68e'
-    >>> obj.id  # Same ID on subsequent access
-    '02248d1fd3c14f3aa16cb1eb61d0d68e'
+        class Component(Identifiable):
+            pass
 
-    Setting a custom ID before first access:
+        comp = Component()
+        print(comp.id)  # '3a5f8e2c1b9d4f7a...'
 
-    >>> obj = Identifiable()
-    >>> obj.id = 'f2efab5c19ee4df09d4baa541dc3436c'
-    >>> obj.id
-    'f2efab5c19ee4df09d4baa541dc3436c'
+    Lookup by ID::
 
-    IDs are immutable after assignment:
+        comp_id = comp.id
+        retrieved = Identifiable.get_instance(comp_id)
+        assert retrieved is comp
 
-    >>> obj = Identifiable()
-    >>> obj.id
-    'f014267e9e28416290437e8e6c81cfd5'
-    >>> obj.id = 'c83951b43bdb4b85ab3774dafa24de1a'
-    Traceback (most recent call last):
-        ...
-    AttributeError: id is a write-once property and has already been set
+    Hash and equality based on ID::
 
-    Looking up instances by ID:
+        comp1 = Component()
+        comp2 = Component()
 
-    >>> obj = Identifiable()
-    >>> obj_id = obj.id
-    >>> retrieved = Identifiable.get_instance(obj_id)
-    >>> retrieved is obj
-    True
+        # Different IDs
+        assert comp1 != comp2
+        assert hash(comp1) != hash(comp2)
 
-    Using in sets and dictionaries (hashable by ID):
+        # Can use in sets and dicts
+        components = {comp1, comp2}
 
-    >>> obj1 = Identifiable()
-    >>> obj2 = Identifiable()
-    >>> unique_objects = {obj1, obj2}
-    >>> len(unique_objects)
-    2
+    Write-once protection::
+
+        comp = Component()
+        original_id = comp.id
+
+        # Cannot change ID
+        comp.id = 'different-id'  # Raises AttributeError
 
     Notes
     -----
-    This class uses :py:class:`SerializableProperty` with the following flags:
+    **Equality Semantics**
+        Two Identifiable objects are equal if they have the same ID.
+        This implements value equality; for identity equality use ``is``.
+        Subclasses can override ``__eq__`` for content-based equality.
 
-    - ``writeonce=True``: ID can only be set once, then becomes immutable
-    - ``copiable=False``: When copying an object, a new ID is generated
+    **Hash Consistency**
+        Hash is based solely on ID, ensuring objects can be used in sets
+        and as dictionary keys. Hash remains consistent even if other
+        attributes change.
 
-    The instance registry uses :py:class:`weakref.WeakValueDictionary`, which
-    means objects can be garbage collected even when in the registry. If an
-    object is garbage collected, its ID will no longer be retrievable via
-    :meth:`get_instance`.
+    **Weak References**
+        The registry uses weak references, so instances can be garbage
+        collected even while registered. After garbage collection,
+        ``get_instance()`` will return None for that ID.
 
-    Warnings
-    --------
-    Although this class is not abstract, it is primarily designed to be used
-    as a mixin rather than instantiated directly. It provides the ``id``
-    property to any class that inherits from it.
+    **Copy Behavior**
+        The ID is not copied when using ``copy.copy()`` or serialization
+        with ``is_copy=True``. Each copy gets a new, unique ID.
 
-    When using with serialization frameworks, ensure the ID is included in
-    serialization but excluded from copying (which is handled automatically
-    by the ``copiable=False`` flag).
+    **Thread Safety**
+        The registry is not thread-safe. Concurrent access from multiple
+        threads may require external synchronization.
 
     See Also
     --------
-    Nameable : Mixin for objects with human-readable names
-    Taggable : Mixin for objects with mnemonic tags
-    Describable : Mixin for objects with descriptions
-    SerializableProperty : Property descriptor used for ID management
-
-    References
-    ----------
-    .. [1] RFC 4122 - A Universally Unique IDentifier (UUID) URN Namespace
-           https://tools.ietf.org/html/rfc4122
+    Taggable : Symbolic identifier for namespace access
+    SerializableProperty : Property descriptor used for id
     """
 
-    _instances = weakref.WeakValueDictionary()
+    _instances: WeakValueDictionary[str, Identifiable] = WeakValueDictionary()
 
-    id = SerializableProperty(copiable=False, writeonce=True, doc="""
-    Unique identifier for the object.
-    
-    A 32-character hexadecimal string representing a UUID v4. Automatically
-    generated on first access if not explicitly set. Once set (either
-    automatically or manually), the ID cannot be changed.
-    
-    Type
-    ----
-    str
-    
-    Properties
-    ----------
-    - **Write-once**: Can be set only once, then becomes immutable
-    - **Not copiable**: Copies receive new IDs rather than copying the original
-    - **Lazy**: Generated only when first accessed, not at object creation
-    - **Validated**: Must be a valid UUID v4 format if set manually
-    
-    Raises
-    ------
-    AttributeError
-        If attempting to modify an already-set ID.
-    ValueError
-        If setting to an invalid UUID v4 format.
-    
-    Examples
-    --------
-    Automatic generation:
-    
-    >>> obj = Identifiable()
-    >>> obj.id  # Generated on first access
-    '550e8400e29b41d4a716446655440000'
-    
-    Manual setting (must be valid UUID v4):
-    
-    >>> obj = Identifiable()
-    >>> obj.id = '123e4567e89b12d3a456426614174000'
-    >>> obj.id
-    '123e4567e89b12d3a456426614174000'
-    
-    Attempting to change ID fails:
-    
-    >>> obj.id = 'different-id'
-    Traceback (most recent call last):
-        ...
-    AttributeError: id is a write-once property and has already been set
-    """)
+    id: str = SerializableProperty(copiable=False, writeonce=True, doc="""
+        Globally unique identifier (UUID v4).
+        
+        A 32-character hexadecimal UUID v4 string that uniquely identifies this instance.
+        Automatically generated on first access if not explicitly provided. Write-once
+        (cannot be changed after initialization) and non-copiable (each copy gets a new ID).
+        
+        Type
+        ----
+        str
+        
+        Default
+        -------
+        Auto-generated UUID v4 hex string (e.g., '3a5f8e2c1b9d4f7a...')
+        
+        Constraints
+        -----------
+        - Must be a valid UUID v4
+        - Write-once: cannot be changed after first set
+        - Non-copiable: excluded from copy/serialization
+        - Automatically registers instance in global weak-reference registry
+        
+        Examples
+        --------
+        Automatic generation::
+        
+            obj = Identifiable()
+            print(obj.id)  # '3a5f8e2c1b9d4f7a0b1c2d3e4f5a6b7c'
+        
+        Explicit setting (during deserialization)::
+        
+            # ID is validated and normalized
+            obj.id = 'A1B2C3D4-E5F6-4789-ABCD-EF0123456789'
+        
+        Immutability::
+        
+            obj = Identifiable()
+            obj.id = 'different-id'  # Raises AttributeError
+        
+        Lookup by ID::
+        
+            obj_id = obj.id
+            retrieved = Identifiable.get_instance(obj_id)
+            assert retrieved is obj
+        
+        Notes
+        -----
+        The ID serves as the basis for ``__hash__()`` and ``__eq__()``, enabling
+        instances to be used in sets and as dictionary keys. Objects with the same
+        ID are considered equal.
+        
+        See Also
+        --------
+        Identifiable.get_instance : Retrieve instance by ID
+        """)
 
     @id.default
     def id(self) -> str:
@@ -275,60 +274,54 @@ class Identifiable:
             msg = f"Invalid UUID for id: {value!r}. Must be a valid UUID v4."
             raise ValueError(msg) from error
 
-    @id.add_observer
-    def id(self, old_value: str, new_value: str) -> None:
-        Identifiable._instances[new_value] = self
+    @id.postinitializer
+    def id(self) -> None:
+        Identifiable._instances[self.id] = self
 
     def __hash__(self) -> int:
         """
-        Return hash of the object based on its ID.
-
-        Allows Identifiable objects to be used in sets and as dictionary keys.
-        Two objects with the same ID will have the same hash (though in
-        practice, IDs should be unique across all instances).
-
-        The hash is computed from the ID string. Note that accessing the hash
-        will trigger ID generation if the ID has not yet been set.
+        Compute hash based on ID.
 
         Returns
         -------
         int
-            Hash value based on the object's ID.
-
-        Examples
-        --------
-        Using Identifiable objects in sets:
-
-        >>> obj1 = Identifiable()
-        >>> obj2 = Identifiable()
-        >>> obj3 = obj1  # Same object
-        >>>
-        >>> objects = {obj1, obj2, obj3}
-        >>> len(objects)  # obj1 and obj3 are the same
-        2
-
-        Using as dictionary keys:
-
-        >>> obj = Identifiable()
-        >>> registry = {obj: "some data"}
-        >>> registry[obj]
-        'some data'
+            Hash of the ID string.
 
         Notes
         -----
-        Calling this method will trigger ID generation if the ID has not
-        already been accessed or set. This ensures objects always have
-        consistent hash values.
-
-        The hash is based solely on the ID, not on any other object
-        attributes. This means the hash remains stable even if other
-        attributes change (which is required for hashable objects).
-
-        See Also
-        --------
-        __eq__ : Equality comparison (should be implemented by subclasses)
+        Hash is consistent and based only on ID, allowing objects to be
+        used in sets and as dictionary keys even if other attributes change.
         """
         return hash(self.id)
+
+    def __eq__(self, other: Any) -> bool:
+        """
+        Compare equality based on ID.
+
+        Two Identifiable objects are equal if they have the same ID.
+
+        Parameters
+        ----------
+        other : Any
+            Object to compare with.
+
+        Returns
+        -------
+        bool
+            True if other is Identifiable with same ID, False otherwise.
+            Returns NotImplemented for non-Identifiable objects.
+
+        Notes
+        -----
+        This implements value equality. For identity equality (same object),
+        use the ``is`` operator.
+
+        Subclasses may override this for content-based equality while still
+        inheriting ID-based hashing.
+        """
+        if not isinstance(other, Identifiable):
+            return NotImplemented
+        return self.id == other.id
 
     @classmethod
     def get_instance(cls, id_: str) -> Identifiable | None:
@@ -390,116 +383,160 @@ class Identifiable:
         """
         return Identifiable._instances.get(id_)
 
+
 # ========== ========== ========== ========== ========== Taggable
 class Taggable:
     """
-    Mixin class providing a user-defined symbolic tag.
+    Mixin that adds a symbolic tag for namespace access.
 
-    ``Taggable`` represents an object that can be assigned a symbolic label
-    (``tag``) intended to be used as an external reference by container or
-    registry objects (e.g. ``TagNamespace``).
+    Provides a validated tag attribute that must be a valid Python identifier
+    (but not a keyword). Tags are intended for programmatic, attribute-style
+    access in namespaces or registries, similar to how pandas DataFrames expose
+    columns.
 
-    The tag itself has no intrinsic behavior beyond validation and storage.
-    In particular, a ``Taggable`` does not automatically register itself
-    anywhere, nor does it manage uniqueness or lookup.
-
-    The tag is designed to be compatible with Python attribute access, so that
-    container objects may expose tagged members using ``container.<tag>``
-    syntax.
+    Unlike names, tags have strict validation rules to ensure they can be
+    used as Python identifiers. They are mutable, allowing dynamic reorganization.
 
     Attributes
     ----------
     tag : str or None
-        Optional symbolic tag identifying the object. If None, the object is
-        considered untagged and cannot be resolved by tag-based lookup.
-
-    Tag validation rules
-    --------------------
-    When assigned, the tag value is validated as follows:
-
-    - ``None`` is accepted and represents an untagged object.
-    - The value is coerced to ``str`` and stripped of leading/trailing
-      whitespace.
-    - The resulting string must be a valid Python identifier
-      (``str.isidentifier()``).
-    - The string must not be a Python keyword (``keyword.iskeyword``).
-
-    These rules ensure that valid tags may be safely exposed via attribute
-    access on container objects.
-
-    Notes
-    -----
-    - ``None`` is treated as a special value meaning "no tag".
-    - The empty string is not allowed.
-    - Unicode identifiers are allowed if they satisfy
-      ``str.isidentifier()`` and are not keywords.
-
-    Tag lifecycle
-    -------------
-    ``Taggable`` does not enforce immutability of the tag. The tag may be
-    changed at any time.
-
-    However, container objects such as ``TagNamespace`` are *not required*
-    to observe or react to tag changes. Changing the tag of a registered
-    object does not automatically update any external registries or views.
-
-    If a container requires consistency after a tag change, the object must
-    be explicitly re-registered or refreshed according to that container's
-    rules.
+        A symbolic identifier string. Must be a valid Python identifier
+        (alphanumeric and underscore, not starting with digit) and not
+        a Python keyword. Can be None.
 
     Examples
     --------
-    >>> obj = Taggable()
-    >>> obj.tag = "satellite_1"
-    >>> obj.tag
-    'satellite_1'
+    Valid tags::
 
-    >>> obj.tag = None
-    >>> obj.tag is None
-    True
+        obj = Taggable()
+        obj.tag = "sensor_a"
+        obj.tag = "temp_sensor_01"
+        obj.tag = "_private"
 
-    >>> obj.tag = "class"
-    Traceback (most recent call last):
-        ...
-    ValueError: Invalid tag: 'class'. Must not be a Python keyword.
+    Invalid tags (will raise ValueError)::
+
+        obj.tag = "123invalid"      # Starts with digit
+        obj.tag = "invalid-tag"     # Contains hyphen
+        obj.tag = "invalid tag"     # Contains space
+        obj.tag = "if"              # Python keyword
+
+    Namespace-style access (intended use case)::
+
+        class System:
+            def __init__(self):
+                self._components = {}
+
+            def add(self, component):
+                self._components[component.tag] = component
+
+            def __getattr__(self, tag):
+                return self._components.get(tag)
+
+        system = System()
+
+        sensor = Taggable()
+        sensor.tag = "temp_sensor"
+        system.add(sensor)
+
+        # Attribute-style access
+        assert system.temp_sensor is sensor
+
+    Mutability::
+
+        obj = Taggable()
+        obj.tag = "first_tag"
+        obj.tag = "second_tag"  # Can change
+        obj.tag = None          # Can reset
+
+    Notes
+    -----
+    **Validation Rules**
+        - Must be a valid Python identifier: ``str.isidentifier()``
+        - Cannot be a Python keyword (``if``, ``for``, ``class``, etc.)
+        - Leading/trailing whitespace is stripped before validation
+        - Empty string (or whitespace-only) is invalid
+
+    **Uniqueness**
+        Tags are not globally unique. Uniqueness should be enforced at the
+        container level (e.g., within a specific namespace or system).
+
+    **Mutability**
+        Tags are mutable to allow dynamic reorganization. Containers that
+        index by tag must handle tag changes appropriately.
+
+    **Use Cases**
+        - Component identification in hierarchical systems
+        - Attribute-style namespace access
+        - Symbolic references in configuration files
+        - Human-readable identifiers in logs and debugging
+
+    See Also
+    --------
+    Identifiable : Globally unique identifier
+    Nameable : Human-readable display name
     """
 
-    tag = SerializableProperty(doc="""
-        Symbolic identifier used for external referencing.
-
-        The ``tag`` is intended to act as a stable, human-chosen name for an
-        object, allowing other objects or containers to refer to it by a
-        meaningful string. Most commonly, a container such as ``TagNamespace``
-        uses this value to expose members by attribute access:
-
-        - ``namespace[tag]`` (authoritative lookup)
-        - ``namespace.<tag>`` (convenience lookup for identifier-safe tags)
-
-        Parameters
-        ----------
-        value : str or None
-            The proposed tag value.
-
-        Returns
-        -------
+    tag: str|None = SerializableProperty(doc="""
+        Symbolic identifier for namespace-style access.
+        
+        A validated string that must be a valid Python identifier (but not a keyword).
+        Intended for programmatic, attribute-style access in containers and namespaces,
+        similar to how pandas DataFrames expose columns.
+        
+        Type
+        ----
         str or None
-            Normalized tag, or None if untagged.
-
-        Validation Rules
-        ----------------
-        - ``None`` is accepted and represents an untagged object.
-        - Non-None values are coerced to ``str`` and stripped of whitespace.
-        - The resulting string must satisfy ``str.isidentifier()``.
-        - The string must not be a Python keyword (``keyword.iskeyword``).
-
+        
+        Default
+        -------
+        None
+        
+        Constraints
+        -----------
+        - Must be a valid Python identifier: ``str.isidentifier()``
+        - Cannot be a Python keyword (``if``, ``for``, ``class``, etc.)
+        - Leading/trailing whitespace is automatically stripped
+        - Empty strings are invalid (ValueError)
+        - Case-sensitive
+        
+        Examples
+        --------
+        Valid tags::
+        
+            obj.tag = "sensor_a"
+            obj.tag = "temp_sensor_01"
+            obj.tag = "_private"
+        
+        Invalid tags::
+        
+            obj.tag = "123invalid"      # Starts with digit
+            obj.tag = "invalid-tag"     # Contains hyphen
+            obj.tag = "invalid tag"     # Contains space
+            obj.tag = "if"              # Python keyword
+            obj.tag = ""                # Empty string
+        
+        Namespace access pattern::
+        
+            # Container provides attribute-style access by tag
+            system.sensor_a  # Returns object with tag='sensor_a'
+        
+        Whitespace normalization::
+        
+            obj.tag = "  my_tag  "
+            assert obj.tag == "my_tag"
+        
         Notes
         -----
-        - Tags are validated to ensure they are compatible with Python
-          attribute access, which enables idioms like ``namespace.<tag>``.
-        - Objects with ``tag is None`` may still be registered in a namespace,
-          but are not resolvable by tag-based lookup until a non-None tag is set.
-        - Changing the tag does not automatically update external containers
-          unless those containers explicitly handle tag updates.
+        Tags are mutable (can be changed) to support dynamic reorganization of
+        namespaces. Uniqueness is not enforced globally - containers should manage
+        tag uniqueness within their scope.
+        
+        Use tags for programmatic access, not display. For human-readable labels,
+        use the ``name`` property from Nameable.
+        
+        See Also
+        --------
+        Nameable.name : Human-readable display name
         """)
 
     @tag.parser
@@ -518,300 +555,153 @@ class Taggable:
         return value
 
 
-class TagNamespace:
-    """
-    Namespace-like container exposing ``Taggable`` objects by their tags.
-
-    ``TagNamespace`` provides a lightweight, dynamic view over a collection
-    of ``Taggable`` objects, allowing them to be accessed by their tag using
-    either dictionary-style or attribute-style lookup.
-
-    This class does not own the objects it references, nor does it impose
-    constraints on tag mutation after registration. It is intentionally
-    passive and non-reactive.
-
-    Conceptual model
-    ----------------
-    ``TagNamespace`` acts as a *resolver*, not an index:
-
-    - It stores references to ``Taggable`` objects.
-    - Lookup by tag is performed dynamically at access time.
-    - No internal indexing is maintained.
-    - Tag changes on registered objects are not tracked automatically.
-
-    This design prioritizes correctness, simplicity, and explicit lifecycle
-    control over lookup performance.
-
-    Lookup semantics
-    ----------------
-    Two equivalent lookup mechanisms are provided:
-
-    - ``namespace[tag]`` (authoritative, always works)
-    - ``namespace.<tag>`` (convenience, best-effort)
-
-    Attribute-based access is only possible for tags that are valid Python
-    identifiers and do not collide with existing attributes or methods.
-
-    Storage model
-    -------------
-    Internally, registered objects are stored in insertion order in a list.
-    Lookup by tag is therefore O(n).
-
-    This choice avoids issues with mutable tags and hashing invariants, and
-    ensures predictable behavior even when tags are assigned or changed
-    after registration.
-
-    Notes
-    -----
-    - Multiple objects may share the same tag. In such cases, lookup returns
-      the first matching object in registration order.
-    - Objects with ``tag is None`` may be registered, but are not resolvable
-      by tag-based lookup.
-    - Changing the tag of a registered object does not update the namespace.
-      Re-registration is required if consistency is needed.
-
-    Examples
-    --------
-    >>> ns = TagNamespace()
-    >>> a = Taggable()
-    >>> b = Taggable()
-    >>> a.tag = "alpha"
-    >>> b.tag = "beta"
-    >>> ns.register(a)
-    >>> ns.register(b)
-
-    >>> ns["alpha"] is a
-    True
-
-    >>> ns.beta is b
-    True
-    """
-    # ========== ========== ========== ========== ========== class attributes
-    ...
-
-    # ========== ========== ========== ========== ========== special methods
-    def __init__(self) -> None:
-        """
-        Initialize an empty TagNamespace.
-
-        The namespace starts with no registered objects.
-        """
-        self._taggable: list[Taggable] = []
-
-    def __getitem__(self, tag: str) -> Taggable:
-        """
-        Retrieve a registered object by its tag.
-
-        Parameters
-        ----------
-        tag : str
-         Tag identifying the desired object.
-
-        Returns
-        -------
-        Taggable
-         The first registered object whose ``tag`` equals the given value.
-
-        Raises
-        ------
-        KeyError
-         If no registered object has the given tag.
-
-        Notes
-        -----
-        This is the authoritative lookup mechanism and works for all tags,
-        including those that are not valid Python identifiers.
-        """
-        for taggable in self._taggable:
-            if taggable.tag == tag:
-                return taggable
-
-        raise KeyError(f"No taggable registered with tag '{tag}'.")
-
-    def __getattr__(self, tag: str) -> Taggable:
-        """
-        Retrieve a registered object by attribute-style tag lookup.
-
-        Parameters
-        ----------
-        tag : str
-            Attribute name corresponding to a tag.
-
-        Returns
-        -------
-        Taggable
-            The resolved object.
-
-        Raises
-        ------
-        AttributeError
-            If no object with the given tag is registered.
-
-        Notes
-        -----
-        This method is only invoked if normal attribute lookup fails.
-        It provides syntactic convenience and mirrors the behavior of
-        libraries such as pandas.
-
-        If a tag collides with an existing attribute or method name,
-        attribute access resolves to the attribute, not the tag.
-        """
-        try:
-            return self[tag]
-        except KeyError as error:
-            raise AttributeError(f"No tag '{tag}' registered.") from error
-
-    def __contains__(self, reference: Taggable|str) -> bool:
-        """
-        Test whether an object or tag is registered.
-
-        Parameters
-        ----------
-        reference : Taggable or str
-            Either a Taggable instance or a tag string.
-
-        Returns
-        -------
-        bool
-            True if the object is registered or if a matching tag exists.
-
-        Notes
-        -----
-        When testing membership by tag string, the result is True if at least
-        one registered object has the given tag.
-        """
-        if isinstance(reference, Taggable):
-            return reference in self._taggable
-
-        return reference in (taggable.tag for taggable in self._taggable)
-
-    # ========== ========== ========== ========== ========== private methods
-    ...
-
-    # ========== ========== ========== ========== ========== protected methods
-    ...
-
-    # ========== ========== ========== ========== ========== public methods
-    def register(self, taggable: Taggable) -> None:
-        """
-        Register a Taggable object in the namespace.
-
-        Parameters
-        ----------
-        taggable : Taggable
-            Object to register.
-
-        Raises
-        ------
-        ValueError
-            If the object is already registered.
-
-        Notes
-        -----
-        - Objects may be registered even if ``taggable.tag is None``.
-        - No validation of tag uniqueness is performed.
-        - Registration does not freeze or lock the object's tag.
-        """
-        if taggable in self:
-            raise ValueError(f"Taggable object already registered: {taggable!r}.")
-
-        self._taggable.append(taggable)
-
-    def unregister(self, reference: Taggable|str) -> None:
-        """
-        Unregister a Taggable object from the namespace.
-
-        Parameters
-        ----------
-        reference : Taggable or str
-            Either the object itself or its tag.
-
-        Raises
-        ------
-        ValueError
-            If the object is not registered or if no object matches the tag.
-
-        Notes
-        -----
-        When a string is provided, the first object with the matching tag is
-        removed.
-        """
-        if isinstance(reference, str):
-            reference = self[reference]
-
-        try:
-            self._taggable.remove(reference)
-
-        except ValueError as error:
-            raise ValueError(f"Taggable object not registered: {reference!r}.") from error
-
-    # ---------- ---------- ---------- ---------- ---------- properties
-    ...
-
-
 # ========== ========== ========== ========== ========== Nameable
 class Nameable:
     """
-    Mixin class providing a human-readable name.
+    Mixin that adds a human-readable name.
 
-    ``Nameable`` adds a single serializable attribute, ``name``, intended for
-    user-facing labels (e.g., display names in UIs, reports, logs, or plots).
+    Provides a name attribute for display and labeling purposes. Names are
+    less restrictive than tags - they can contain spaces, special characters,
+    and non-ASCII characters. They are intended for user-facing contexts like
+    UI labels, reports, and logs.
 
-    This mixin does not impose uniqueness or identification semantics; it is
-    strictly descriptive. If you need stable identity, pair with an
-    identification mixin (e.g., ``Identifiable``) or a separate registry.
+    Names are normalized by stripping whitespace and converting empty strings
+    to None.
 
     Attributes
     ----------
     name : str or None
-        Optional human-readable name.
+        A human-readable name string. Can contain any characters.
+        Leading/trailing whitespace is stripped. Empty strings become None.
 
-    Normalization rules
-    -------------------
-    - ``None`` is accepted and represents an unnamed object.
-    - Non-None values are coerced to ``str`` and stripped of leading/trailing
-      whitespace.
+    Examples
+    --------
+    Basic usage::
+
+        obj = Nameable()
+        obj.name = "Temperature Sensor"
+        print(obj.name)  # 'Temperature Sensor'
+
+    Special characters allowed::
+
+        obj.name = "Sensor #1 (Main)"
+        obj.name = "Test-Case-A"
+        obj.name = "Tëst Nämé"
+        obj.name = "测试名称"
+
+    Normalization::
+
+        obj.name = "  Name  "
+        print(obj.name)  # 'Name' (whitespace stripped)
+
+        obj.name = "   "
+        print(obj.name)  # None (empty after stripping)
+
+        obj.name = ""
+        print(obj.name)  # None
+
+    Type conversion::
+
+        obj.name = 123
+        print(obj.name)  # '123'
+
+        obj.name = 3.14
+        print(obj.name)  # '3.14'
 
     Notes
     -----
-    Whitespace-only and the empty string will be treated as ``None``.
+    **Validation**
+        Minimal validation is performed. Any value is converted to string
+        and stripped. Empty results become None.
+
+    **Use Cases**
+        - UI labels and display text
+        - Report headers
+        - Log messages
+        - User-facing identifiers
+        - Documentation titles
+
+    **Comparison with Tag**
+        Tags are for programmatic access (strict validation), names are
+        for human display (loose validation). Objects often have both::
+
+            component.tag = "temp_sensor_01"  # For code
+            component.name = "Temperature Sensor #1"  # For UI
+
+    **Length**
+        No length restrictions are imposed. Very long names are allowed
+        but may need truncation for display purposes.
 
     See Also
     --------
-    Describable
-        Adds a longer free-form description field.
-    Taggable
-        Adds a symbolic tag intended for attribute-like lookup in registries.
+    Taggable : Symbolic identifier for namespace access
+    Describable : Extended description text
     """
-
-    name = SerializableProperty(doc="""
-        Human-readable name of the object.
-
-        The ``name`` field is intended for display purposes (UI labels, report
-        headings, plot legends). It should be meaningful to humans but does not
-        need to be globally unique.
-
-        Parameters
-        ----------
-        value : object or None
-            Proposed name value. If not None, it is converted to ``str``.
-
-        Returns
-        -------
+    name: str = SerializableProperty(doc="""
+        Human-readable display name.
+        
+        A string for labeling and display purposes. Less restrictive than tags -
+        can contain spaces, special characters, and Unicode. Intended for user-facing
+        contexts like UI labels, reports, and logs.
+        
+        Type
+        ----
         str or None
-            Normalized name (stripped) or None if unset.
-
-        Normalization Rules
-        -------------------
-        - ``None`` is accepted and preserved.
-        - Otherwise, the value is coerced to ``str`` and stripped.
-
+        
+        Default
+        -------
+        None
+        
+        Constraints
+        -----------
+        - Any characters allowed (spaces, punctuation, Unicode)
+        - Leading/trailing whitespace is automatically stripped
+        - Empty strings (or whitespace-only) normalize to None
+        - Converted to string if other type provided
+        - No length restrictions
+        
+        Examples
+        --------
+        Basic usage::
+        
+            obj.name = "Temperature Sensor"
+            obj.name = "Sensor #1 (Main)"
+            obj.name = "Test-Case-A"
+        
+        Unicode support::
+        
+            obj.name = "Tëst Nämé"
+            obj.name = "测试名称"
+            obj.name = "📊 Data Dashboard"
+        
+        Normalization::
+        
+            obj.name = "  Name  "
+            assert obj.name == "Name"
+            
+            obj.name = "   "
+            assert obj.name is None
+            
+            obj.name = ""
+            assert obj.name is None
+        
+        Type conversion::
+        
+            obj.name = 123
+            assert obj.name == "123"
+        
         Notes
         -----
-        The normalization is intentionally minimal: it does not change casing,
-        does not collapse internal whitespace, and does not enforce any length
-        constraints. Those policies, if needed, should be implemented at a
-        higher level.
+        Use names for display and human consumption. For programmatic identifiers
+        that work in attribute access, use tags from Taggable.
+        
+        Names are mutable and have no uniqueness constraints. Very long names
+        may need truncation for display purposes.
+        
+        See Also
+        --------
+        Taggable.tag : Symbolic identifier for namespace access
+        Describable.description : Extended description text
         """)
 
     @name.parser
@@ -827,68 +717,133 @@ class Nameable:
 # ========== ========== ========== ========== ========== Describable
 class Describable:
     """
-    Mixin class providing a free-form description.
+    Mixin that adds a free-form description.
 
-    ``Describable`` adds a single serializable attribute, ``description``,
-    intended for longer text compared to ``Nameable.name``. Typical uses
-    include:
+    Provides a description attribute for extended context, documentation, or
+    explanatory text. Descriptions can be multiline and have no length
+    restrictions. They are intended for detailed information that doesn't
+    fit in a short name.
 
-    - documentation strings attached to objects,
-    - operator notes,
-    - provenance / context text,
-    - UI tooltips or detail panels.
+    Like names, descriptions are normalized by stripping whitespace and
+    converting empty strings to None.
 
     Attributes
     ----------
     description : str or None
-        Optional free-form description text.
+        Free-form description text. Can be multiline and any length.
+        Leading/trailing whitespace is stripped. Empty strings become None.
 
-    Normalization rules
-    -------------------
-    - ``None`` is accepted and represents an absent description.
-    - Non-None values are coerced to ``str`` and stripped of leading/trailing
-      whitespace.
+    Examples
+    --------
+    Basic usage::
+
+        obj = Describable()
+        obj.description = "This sensor monitors ambient temperature."
+        print(obj.description)
+
+    Multiline descriptions::
+
+        obj.description = '''
+        This is a multiline description.
+        It can span multiple lines.
+        Useful for detailed documentation.
+        '''
+
+    Normalization (same as Nameable)::
+
+        obj.description = "  Text  "
+        print(obj.description)  # 'Text'
+
+        obj.description = ""
+        print(obj.description)  # None
+
+    Long descriptions::
+
+        obj.description = "A" * 10000  # No length limit
+        print(len(obj.description))  # 10000
 
     Notes
     -----
-    - This mixin intentionally does not impose formatting rules (Markdown,
-      reStructuredText, etc.). Treat it as plain text unless your application
-      layer specifies otherwise.
-    - Whitespace-only and the empty string will be treated as ``None``.
+    **Use Cases**
+        - Detailed documentation
+        - Usage instructions
+        - Configuration notes
+        - Context for debugging
+        - Help text in UIs
+
+    **Formatting**
+        No formatting is applied. If you need formatted text (markdown,
+        HTML, etc.), store it as a string and format at display time.
+
+    **Length**
+        No restrictions. Very long descriptions are allowed. Consider
+        pagination or truncation in UI contexts.
 
     See Also
     --------
-    Nameable
-        Adds a shorter human-readable label.
+    Nameable : Short display name
     """
-
-    description = SerializableProperty(doc="""
-        Free-form description text.
-
-        The ``description`` field is meant for longer, explanatory content that
-        helps users understand the object beyond its name or identifiers.
-
-        Parameters
-        ----------
-        value : object or None
-            Proposed description. If not None, it is converted to ``str``.
-
-        Returns
-        -------
+    description: str = SerializableProperty(doc="""
+        Free-form descriptive text.
+        
+        Extended context, documentation, or explanatory information. Can be multiline
+        and arbitrarily long. Intended for detailed information that doesn't fit in
+        a short name.
+        
+        Type
+        ----
         str or None
-            Normalized description (stripped) or None if unset.
-
-        Normalization Rules
-        -------------------
-        - ``None`` is accepted and preserved.
-        - Otherwise, the value is coerced to ``str`` and stripped of leading and
-          trailing whitespace.
-
+        
+        Default
+        -------
+        None
+        
+        Constraints
+        -----------
+        - Any characters allowed (including newlines)
+        - Leading/trailing whitespace is automatically stripped
+        - Empty strings (or whitespace-only) normalize to None
+        - Converted to string if other type provided
+        - No length restrictions
+        
+        Examples
+        --------
+        Basic usage::
+        
+            obj.description = "This sensor monitors ambient temperature."
+        
+        Multiline text::
+        
+            obj.description = '''
+            This is a detailed description.
+            It can span multiple lines.
+            Useful for documentation.
+            '''
+        
+        Very long text::
+        
+            obj.description = "Long documentation..." * 1000  # No limit
+        
+        Normalization (same as name)::
+        
+            obj.description = "  Text  "
+            assert obj.description == "Text"
+            
+            obj.description = ""
+            assert obj.description is None
+        
         Notes
         -----
-        The normalization is intentionally minimal. If your application requires
-        additional constraints (length limits, formatting, sanitization), apply
-        them at the application layer.
+        Descriptions are for extended information - use name for short labels.
+        No formatting is applied - if you need formatted text (markdown, HTML),
+        store it as a string and format at display time.
+        
+        Common use cases: detailed documentation, usage instructions, configuration
+        notes, debugging context, help text in UIs.
+        
+        See Also
+        --------
+        Nameable.name : Short display name
         """)
 
     @description.parser
@@ -904,181 +859,318 @@ class Describable:
 # ========== ========== ========== ========== ========== Colorable
 class Colorable:
     """
-    Mixin class providing a color attribute.
+    Mixin that adds a color attribute for visualization.
 
-    ``Colorable`` adds a single serializable attribute, ``color``, representing
-    a color encoded as an HTML hexadecimal string (``#RRGGBB``).
+    Provides a color attribute stored as a canonical HTML hex string
+    (``#RRGGBB`` format). Accepts various color formats via matplotlib's
+    color parsing, including hex strings, RGB tuples, and named colors.
 
-    The color is intended primarily for visualization and UI purposes
-    (plots, diagrams, dashboards, styling), where a compact and portable
-    representation is desirable.
+    The default color is matplotlib's C0 (``#1F77B4``), a pleasant blue.
 
     Attributes
     ----------
     color : str
-        Color encoded as an HTML hex string (``#RRGGBB``).
+        Color as uppercase HTML hex string (``#RRGGBB`` format).
+        Default is ``'#1F77B4'`` (matplotlib C0 blue).
 
-    Default value
-    -------------
-    The default color is ``"#1F77B4"``, matching the first color of Matplotlib’s
-    default color cycle. This provides consistent and visually pleasing behavior
-    out of the box.
+    Properties
+    ----------
+    color_rgb : tuple[int, int, int]
+        Read-only property returning color as RGB tuple with values 0-255.
 
-    Normalization rules
-    -------------------
-    - The value is normalized via the ``to_hex`` utility function.
-    - The resulting hexadecimal string is uppercased before storage.
+    Examples
+    --------
+    Default color::
+
+        obj = Colorable()
+        print(obj.color)  # '#1F77B4'
+
+    Set from hex string::
+
+        obj.color = '#FF0000'
+        print(obj.color)  # '#FF0000' (red)
+
+    Set from RGB tuple::
+
+        obj.color = (1.0, 0.0, 0.0)  # Float format (0-1)
+        print(obj.color)  # '#FF0000'
+
+    Set from color name::
+
+        obj.color = 'red'
+        print(obj.color)  # '#FF0000'
+
+    Get as RGB tuple::
+
+        obj.color = '#FF0000'
+        print(obj.color_rgb)  # (255, 0, 0)
+
+    Case normalization::
+
+        obj.color = '#ff0000'
+        print(obj.color)  # '#FF0000' (uppercase)
 
     Notes
     -----
-    - ``None`` is not accepted as a valid value for ``color``.
-    - Validation and conversion logic are delegated to ``to_hex``.
-    - The stored value is always canonical (uppercase ``#RRGGBB``).
+    **Color Formats**
+        Input accepts any format that matplotlib's ``to_hex()`` understands:
+
+        - Hex strings: ``'#FF0000'``, ``'#F00'`` (short form)
+        - RGB tuples: ``(1.0, 0.0, 0.0)`` or ``(255, 0, 0)``
+        - Named colors: ``'red'``, ``'blue'``, etc.
+        - Matplotlib colors: ``'C0'``, ``'C1'``, etc.
+
+    **Output Format**
+        Always stored as uppercase ``#RRGGBB`` (6 hex digits).
+        This canonical format ensures consistency.
+
+    **Matplotlib Dependency**
+        Requires matplotlib for color parsing. Consider making this
+        optional or providing a lightweight fallback in future versions.
+
+    **Use Cases**
+        - Visualization and plotting
+        - UI styling and themes
+        - Legend entries
+        - Color-coded categories
 
     See Also
     --------
-    Nameable
-        Provides a human-readable name.
-    Describable
-        Provides a free-form description.
+    matplotlib.colors.to_hex : Color conversion function used
     """
-    color = SerializableProperty(default='#1F77B4', doc="""
-        HTML hex color associated with the object.
-
-        The ``color`` property stores a color encoded as an HTML hexadecimal
-        string of the form ``#RRGGBB``. It is primarily intended for
-        visualization and UI styling.
-
-        Parameters
-        ----------
-        value : object
-            Proposed color value. The value is passed to the ``to_hex`` utility
-            for validation and conversion.
-
-        Returns
-        -------
+    color: str = SerializableProperty(default='#1F77B4', doc="""
+        Color for visualization and styling.
+        
+        Canonical HTML hex string (``#RRGGBB`` format) for visual representation.
+        Accepts various input formats via matplotlib's color parsing, including hex
+        strings, RGB tuples, and named colors. Always stored in uppercase hex format.
+        
+        Type
+        ----
         str
-            Normalized color string in uppercase ``#RRGGBB`` format.
-
-        Raises
-        ------
-        ValueError
-            If the value cannot be converted to a valid HTML hex color.
-
-        Notes
-        -----
-        - The default value is ``"#1F77B4"``.
-        - The normalization step ensures consistent casing and formatting,
-          which is important for comparisons, hashing, and serialization.
-        - Supported input formats depend on the implementation of ``to_hex``
-          (e.g. named colors, RGB tuples, hex strings).
-
+        
+        Default
+        -------
+        '#1F77B4' (matplotlib C0 blue)
+        
+        Constraints
+        -----------
+        - Output always uppercase ``#RRGGBB`` format (6 hex digits)
+        - Input accepts any matplotlib-compatible color format
+        - Validated via matplotlib's color parser
+        - Alpha/transparency not supported
+        
+        Input Formats
+        -------------
+        - Hex strings: ``'#FF0000'``, ``'#F00'`` (short form)
+        - RGB tuples: ``(1.0, 0.0, 0.0)`` (floats 0-1) or ``(255, 0, 0)`` (ints 0-255)
+        - Color names: ``'red'``, ``'blue'``, ``'green'``
+        - Matplotlib colors: ``'C0'``, ``'C1'``, ``'tab:blue'``
+        - Grayscale: ``'0.5'`` (float string)
+        
         Examples
         --------
-        >>> obj = Colorable()
-        >>> obj.color
-        '#1F77B4'
-
-        >>> obj.color = "#ff0000"
-        >>> obj.color
-        '#FF0000'
+        Hex string::
+        
+            obj.color = '#FF0000'
+            assert obj.color == '#FF0000'
+        
+        RGB tuple::
+        
+            obj.color = (1.0, 0.0, 0.0)  # Float format
+            assert obj.color == '#FF0000'
+        
+        Color name::
+        
+            obj.color = 'red'
+            assert obj.color == '#FF0000'
+        
+        Case normalization::
+        
+            obj.color = '#ff0000'
+            assert obj.color == '#FF0000'  # Uppercase
+        
+        Get as RGB tuple::
+        
+            obj.color = '#FF0000'
+            assert obj.color_rgb == (255, 0, 0)
+        
+        Notes
+        -----
+        Requires matplotlib for color parsing. The canonical uppercase ``#RRGGBB``
+        format ensures consistency across the system and compatibility with most
+        graphics APIs and web standards.
+        
+        Use ``color_rgb`` property for integer RGB values (0-255) when needed by
+        graphics libraries.
+        
+        See Also
+        --------
+        Colorable.color_rgb : Read-only RGB tuple property
+        matplotlib.colors.to_hex : Underlying color conversion function
         """)
 
     @color.parser
     def color(self, value: Any) -> str:
         return to_hex(value).upper()
 
+    @property
+    def color_rgb(self) -> tuple[int, int, int]:
+        """
+        Get color as RGB tuple.
+
+        Returns
+        -------
+        tuple[int, int, int]
+            RGB color with values in range 0-255.
+
+        Examples
+        --------
+        >>> obj = Colorable()
+        >>> obj.color = '#FF0000'
+        >>> obj.color_rgb
+        (255, 0, 0)
+        """
+        hex_color = self.color.lstrip('#')
+        return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
 
 # ========== ========== ========== ========== ========== Activatable
 class Activatable:
     """
-    Mixin class providing an "active" boolean flag.
+    Mixin that adds an activation state flag.
 
-    ``Activatable`` adds a single serializable attribute, ``active``, intended
-    to represent whether an object is enabled, selected, currently in effect,
-    or otherwise considered active by application logic.
+    Provides a boolean ``active`` attribute indicating whether an object is
+    enabled, in effect, or otherwise "active". This is useful for objects
+    that can be toggled on/off without destroying them.
 
-    This mixin intentionally does not impose any semantics beyond storing a
-    boolean value. Interpretation is left to the domain layer (e.g., filtering
-    only active assets, rendering inactive objects with lower opacity, etc.).
+    The attribute only accepts strict boolean values (``True`` or ``False``),
+    not truthy/falsy values like integers or strings.
 
     Attributes
     ----------
     active : bool
-        Whether the object is active. Defaults to True.
+        Boolean flag indicating activation state. Default is ``True``.
+        Only accepts actual ``bool`` instances, not truthy/falsy values.
 
-    Default behavior
-    ----------------
-    The default is ``True`` so that objects are "active by default" unless
-    explicitly disabled.
+    Examples
+    --------
+    Basic usage::
 
-    Parsing rules
-    -------------
-    The value is normalized using ``bool(value)``.
+        obj = Activatable()
+        print(obj.active)  # True (default)
 
-    Important: ``bool(...)`` follows Python truthiness rules, which means:
+        obj.active = False
+        print(obj.active)  # False
 
-    - ``bool(False)`` is False
-    - ``bool(0)`` is False
-    - ``bool(1)`` is True
-    - ``bool("")`` is False
-    - ``bool("false")`` is True  (non-empty strings are truthy)
+    Toggling state::
 
-    If you require strict parsing of strings such as "true"/"false", implement
-    a stricter parser (e.g. mapping known strings) instead of using ``bool``.
+        obj.active = not obj.active  # Toggle
+
+    Strict boolean validation::
+
+        obj = Activatable()
+        obj.active = True   # ✓ OK
+        obj.active = False  # ✓ OK
+        obj.active = 1      # ✗ TypeError
+        obj.active = 0      # ✗ TypeError
+        obj.active = "true" # ✗ TypeError
+
+    Conditional logic::
+
+        if obj.active:
+            process(obj)
+        else:
+            skip(obj)
+
+    Notes
+    -----
+    **Strict Validation**
+        Only ``bool`` instances (``True``/``False``) are accepted. This
+        prevents bugs from truthy/falsy values.
+
+    **Use Cases**
+        - Enable/disable components
+        - Toggle features on/off
+        - Mark objects as temporarily inactive
+        - Filtering active vs inactive items
+
+    **State vs Deletion**
+        Use ``active`` for temporary enable/disable. For permanent removal,
+        delete the object instead.
 
     See Also
     --------
-    Taggable
-        Adds a symbolic tag used for external references.
-    Nameable
-        Adds a human-readable name.
+    SerializableProperty : Property descriptor used for active
     """
-
-    active = SerializableProperty(default=True, doc="""
-        Whether the object is active (enabled).
-
-        The ``active`` property is a boolean flag intended to represent whether
-        an object should be considered enabled or in effect by application
-        logic.
-
-        Parameters
-        ----------
-        value : object
-            Proposed value. Normalized using ``bool(value)``.
-
-        Returns
-        -------
+    active: bool = SerializableProperty(default=True, doc="""
+        Activation state flag.
+        
+        Boolean indicating whether the object is enabled, active, or in effect.
+        Useful for objects that can be toggled on/off without being destroyed.
+        Strictly validates boolean type - does not accept truthy/falsy values.
+        
+        Type
+        ----
         bool
-            Normalized boolean value.
-
-        Notes
-        -----
-        This property uses Python truthiness rules via ``bool(value)``. Be aware
-        that non-empty strings are truthy, so values such as ``"false"``,
-        ``"0"``, and ``"no"`` evaluate to True.
-
-        If your API expects strict boolean parsing, consider implementing a
-        stricter parser at the mixin level or in the caller.
-
+        
+        Default
+        -------
+        True
+        
+        Constraints
+        -----------
+        - Must be exactly ``True`` or ``False`` (strict boolean)
+        - No truthy/falsy coercion (1, 0, "", [], None are rejected)
+        - Raises TypeError for non-boolean values
+        
         Examples
         --------
-        >>> obj = Activatable()
-        >>> obj.active
-        True
-
-        >>> obj.active = 0
-        >>> obj.active
-        False
-
-        >>> obj.active = "false"
-        >>> obj.active
-        True
+        Basic usage::
+        
+            obj.active = True
+            obj.active = False
+        
+        Toggling::
+        
+            obj.active = not obj.active
+        
+        Strict validation::
+        
+            obj.active = True   # ✓ OK
+            obj.active = False  # ✓ OK
+            obj.active = 1      # ✗ TypeError
+            obj.active = 0      # ✗ TypeError
+            obj.active = "true" # ✗ TypeError
+            obj.active = None   # ✗ TypeError
+            obj.active = []     # ✗ TypeError
+        
+        Conditional logic::
+        
+            if obj.active:
+                process(obj)
+            
+            active_objects = [o for o in objects if o.active]
+        
+        Notes
+        -----
+        Strict boolean validation prevents subtle bugs from truthy/falsy values.
+        For example, ``"false"`` would be truthy in Python, causing unexpected
+        behavior if coercion were allowed.
+        
+        Use ``active`` for temporary enable/disable. For permanent removal, delete
+        the object instead.
+        
+        The active state persists through serialization, so disabled objects remain
+        disabled after save/load cycles.
         """)
 
     @active.parser
     def active(self, value: bool) -> bool:
-        return bool(value)
+        if not isinstance(value, bool):
+            raise TypeError("Active must be a boolean.")
+
+        return value
 
 
 __all__ = [

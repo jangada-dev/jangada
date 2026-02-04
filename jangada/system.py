@@ -15,6 +15,7 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
 
     # ========== ========== ========== ========== ========== class attributes
     __hash__ = Identifiable.__hash__
+    __eq__ = Identifiable.__eq__
 
     extension = '.sys'
 
@@ -22,11 +23,7 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
     ...
 
     # ---------- ---------- ---------- ---------- subsystems
-    subsystems = SerializableProperty()
-
-    @subsystems.default
-    def subsystems(self) -> dict[str, System]:
-        return {}
+    subsystems: dict[str, System] = SerializableProperty(default={})
 
     @subsystems.parser
     def subsystems(self, value: dict[str, System]) -> dict[str, System]:
@@ -67,10 +64,10 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
 
         return _subsystems
 
-    # ---------- ---------- ---------- ---------- supersystem_id
-    supersystem_id = SerializableProperty()#  -*- coding: utf-8 -*-
+    # ---------- ---------- ---------- ---------- _supersystem_id
+    _supersystem_id = SerializableProperty()
 
-    @supersystem_id.parser
+    @_supersystem_id.parser
     def supersystem_id(self, value: str|None) -> str|None:
 
         if value is None:
