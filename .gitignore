@@ -2,9 +2,13 @@
 .idea
 
 __refs
+__labs
 
 __test/*.dat
+__test/*.json
 __test/*.sys
+__test/script.py
+
 
 # docs
 __docs/_build/

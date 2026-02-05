@@ -24,6 +24,9 @@ pandas                  # https://pandas.pydata.org/docs/
 # shapely                 # https://shapely.readthedocs.io/en/stable/manual.html
 
 # ------------------------------------------------------------------ persisting
+rich
+
+# ------------------------------------------------------------------ persisting
 h5py                    # https://docs.h5py.org/en/stable/
 
 # -------------------------------------------------------------------- plotting

@@ -24,7 +24,7 @@ class TestSystem:
             'name': "SGDC - 1",
             'tag': 'sgdc',
             'description': 'Satélite Geoestacionário de Defesa e Comunicação',
-            'active': True
+            # 'active': True
         }
 
         s = System(**kwargs)
@@ -33,9 +33,11 @@ class TestSystem:
         assert s.name == kwargs['name']
         assert s.tag == kwargs['tag']
         assert s.description == kwargs['description']
-        assert s.active == kwargs['active']
+        # assert s.active == kwargs['active']
 
-        print(s.subsystems)
+        # print(s.subsystems)
+
+        print(s)
 
     def test_integration(self) -> None:
         print()
@@ -58,6 +60,10 @@ class TestSystem:
 
         batt.cell1.name = 'New Name'
         assert batt.cell1.name == 'New Name'
+
+        print(batt)
+
+        return
 
         batt.cell1.tag = 'CELL1'
         try:

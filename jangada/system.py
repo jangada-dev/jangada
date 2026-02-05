@@ -5,13 +5,19 @@ Author: Rafael R. L. Benevides
 
 from __future__ import annotations
 
+from rich.console import RenderableType, Group
+from rich.text import Text
+from rich.panel import Panel
+
+
 from jangada.serialization import Persistable, SerializableProperty
-from jangada.mixin import Identifiable, Taggable, Nameable, Describable, Activatable
+from jangada.display import Displayable
+from jangada.mixin import Identifiable, Taggable, Nameable, Describable
 
 from typing import Any, Iterator, Callable
 
 
-class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activatable):
+class System(Persistable, Displayable, Identifiable, Taggable, Nameable, Describable):
 
     # ========== ========== ========== ========== ========== class attributes
     __hash__ = Identifiable.__hash__
@@ -120,8 +126,6 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
     def __len__(self) -> int:
         return len(self.subsystems)
 
-    def __eq__(self, other) -> bool:
-        return hash(self) == hash(other)
     # ========== ========== ========== ========== ========== private methods
     ...
 
@@ -152,6 +156,49 @@ class System(Persistable, Identifiable, Taggable, Nameable, Describable, Activat
                 del self.subsystems[old_value]
 
         return tag_observer
+
+    def _title(self) -> Text:
+        return Text(f'{type(self).__name__}', style='italic bold bright_yellow')
+
+    def _content(self) -> RenderableType:
+
+        info_data = {
+            'name': self.name,
+            'description': self.description,
+            'tag': self.tag,
+        }
+
+        info_panel = Panel(self.format_as_form(info_data),
+                           title='Info',
+                           title_align='right')
+
+        # ---------- ---------- ---------- ---------- ---------- ----------
+        subsystem_data = {tag: sys.name for tag, sys in self.subsystems.items()}
+
+        subsystem_panel = Panel(self.format_as_form(subsystem_data),
+                                title=Text('Subsystems', style='bold bright_yellow'),
+                                title_align='right',
+                                expand=True)
+
+
+        # ---------- ---------- ---------- ---------- ---------- ----------
+        id_data = {
+            'id': self.id,
+        }
+
+        id_panel = Panel(self.format_as_form(id_data))
+
+
+
+        content = Group(
+            info_panel,
+            subsystem_panel,
+            # Rule(style='bright_cyan'),
+            id_panel
+        )
+
+        return content
+
 
     # ========== ========== ========== ========== ========== public methods
     def add(self, *subsystems: System) -> None:
