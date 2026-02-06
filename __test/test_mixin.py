@@ -284,6 +284,17 @@ class TestTaggable:
             with pytest.raises(ValueError, match="Must not be a Python keyword"):
                 obj.tag = kw
 
+    def test_change_default_tag_of_subclass(self) -> None:
+
+        class Sys(Taggable):
+
+            @Taggable.tag.default
+            def tag(self):
+                return "tag_name"
+
+        assert Sys().tag == "tag_name"
+        assert Taggable().tag is None
+
 
 # ========== ========== ========== ========== Test Nameable
 class TestNameable:

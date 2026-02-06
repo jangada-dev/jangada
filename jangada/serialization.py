@@ -74,6 +74,7 @@ must be registered as a primitive or dataset type, or be a ``Serializable``.
 from __future__ import annotations
 
 import numpy
+import numpy as np
 import pandas
 import h5py
 
@@ -523,7 +524,7 @@ class SerializableProperty:
             first_time = False
 
         # ---------- ---------- ---------- ---------- handle write-once behavior
-        if self.writeonce and current_value is not None:
+        if not first_time and (self.writeonce and current_value is not None):
             raise AttributeError(f"{self.name} is a write-once property and has already been set")
 
         # ---------- ---------- ---------- ---------- set value
@@ -881,6 +882,9 @@ class SerializableProperty:
         ...     lambda self, old, new: print(f"Observer 2: {old} -> {new}")
         ... )
         """
+
+        # self._observers.add(func)
+
         return type(self)(
             postinitializer=self._postinitializer,
             default=self._default,
@@ -928,6 +932,9 @@ class SerializableProperty:
         >>> # Remove the observer
         >>> MyClass.value = MyClass.value.remove_observer(my_observer)
         """
+
+        # self._observers.remove(func)
+
         return type(self)(
             postinitializer=self._postinitializer,
             default=self._default,
@@ -1243,7 +1250,7 @@ class SerializableMetatype(ABCMeta):
 
             cls._serializable_properties = {}
 
-            for base in cls.__mro__:
+            for base in cls.__mro__[::-1]:
 
                 if base is object:
                     continue  # just for not wasting time
@@ -1914,6 +1921,7 @@ class Serializable(metaclass=SerializableMetatype):
         False
         """
         if type(other) is not type(self):
+            print(f"Cannot compare objects of type {type(other)} and {type(self)}")
             return False
 
             # I no longer think this behavior should raise an error
@@ -1930,6 +1938,24 @@ class Serializable(metaclass=SerializableMetatype):
             if isinstance(other_value, Serializable) and isinstance(self_value, Serializable):
                 if not Serializable.__eq__(other_value, self_value):
                     return False
+
+            elif isinstance(other_value, dict) and isinstance(self_value, dict):
+
+                # first, compare keys:
+                other_keys = set(other_value.keys())
+                self_keys = set(self_value.keys())
+
+                if other_keys != self_keys:
+                    return False
+
+                for key in other_keys:
+                    other_value = other_value[key]
+                    self_value = self_value[key]
+                    if not Serializable.__eq__(other_value, self_value):
+                        return False
+
+            # TODO: maybe add supports for lists as well? Actually, this method looks weird.. I should Improve it
+
             else:
                 if not numpy.all(other_value == self_value):
                     return False

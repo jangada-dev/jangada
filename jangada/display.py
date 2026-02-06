@@ -430,7 +430,7 @@ class Displayable(ABC):
     """
 
     # ========== ========== ========== ========== ========== class attributes
-    display_settings: DisplaySettings = SerializableProperty(doc = """
+    display_settings: DisplaySettings = SerializableProperty(copiable=False, doc = """
         Configuration for display formatting and styling.
         
         Provides access to all visual customization options for this object's

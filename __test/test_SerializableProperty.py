@@ -352,7 +352,7 @@ class TestObservers:
         new_prop = base_prop.add_observer(observer_spy)
 
         assert base_prop is not new_prop
-        assert observer_spy not in base_prop._observers
+        assert observer_spy not in base_prop._observers  # TODO: must address to this later, but some tools may break
         assert observer_spy in new_prop._observers
 
     def test_remove_observer_creates_new_descriptor(self, observer_spy: Mock) -> None:
@@ -361,7 +361,7 @@ class TestObservers:
         new_prop = base_prop.remove_observer(observer_spy)
 
         assert base_prop is not new_prop
-        assert observer_spy in base_prop._observers
+        assert observer_spy in base_prop._observers # TODO: must address to this later, but some tools may break
         assert observer_spy not in new_prop._observers
 
     def test_observer_sees_parsed_value(self, observer_spy: Mock) -> None:
