@@ -31,3 +31,6 @@ check_build:
 
 distribute:
 	twine upload dist/*
+
+copy_docs:
+	cp -r docs/_build/html/* ../jangada-dev.github.io/

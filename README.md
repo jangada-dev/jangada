@@ -44,15 +44,6 @@ Six orthogonal capability classes:
 pip install jangada
 ```
 
-For development:
-```bash
-pip install jangada[dev]
-```
-
-For documentation building:
-```bash
-pip install jangada[docs]
-```
 
 ## Quick Start
 
