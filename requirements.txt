@@ -54,6 +54,7 @@ pytest                  # https://docs.pytest.org/en/7.2.x/
 ipython                 # https://ipython.org
 mypy
 pytest-mypy
+toml
 
 # =============================================================================
 # Documenting

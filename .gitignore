@@ -4,14 +4,10 @@
 __refs
 __labs
 
-__test/*.dat
-__test/*.json
-__test/*.sys
-__test/script.py
-
-
-# docs
-__docs/_build/
+test/*.dat
+test/*.json
+test/*.sys
+test/script.py
 
 
 # Byte-compiled / optimized / DLL files
