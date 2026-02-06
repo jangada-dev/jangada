@@ -11,5 +11,7 @@ API Reference
 
     serialization/index
     mixin/index
+    display/index
+    system/index
 
 

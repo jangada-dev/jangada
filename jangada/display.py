@@ -538,18 +538,6 @@ class Displayable(ABC):
         DisplaySettings : The settings class with all options
         format_as_form : Uses property_style setting
         format_as_table : Uses table_* settings
-        """
-        
-        # Usage example:
-        """
-        class Displayable(ABC):
-            display_settings: DisplaySettings = SerializableProperty(
-                doc=display_settings_doc
-            )
-            
-            @display_settings.default
-            def display_settings(self):
-                return DisplaySettings()
         """)
 
     @display_settings.default
