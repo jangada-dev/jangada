@@ -21,3 +21,13 @@ test_current:
 
 test_all:
 	PYTHONPATH=. pytest -s -vv test/test_*.py
+
+build:
+	rm -rf build/ dist/ *.egg-info
+	python -m build
+
+check_build:
+	twine check dist/*
+
+distribute:
+	twine upload dist/*
