@@ -82,7 +82,7 @@ try:
     meta = metadata('jangada')
 
     # Access specific fields
-    __author__ = meta['Author']
+    __author__ = meta['Author-email']
     __license__ = meta['License']
     __version__ = meta['Version']
 
