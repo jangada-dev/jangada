@@ -692,7 +692,7 @@ class Displayable(ABC):
         form.add_column(justify='left', style=None)
 
         for prop, value in data.items():
-            form.add_row(f'{prop}:', value)
+            form.add_row(f'{prop}:', str(value))
 
         return form
 
@@ -891,7 +891,7 @@ class Displayable(ABC):
         # ---------- ---------- ---------- ---------- ---------- ----------
         return table
 
-    def to_html(self) -> str:
+    def to_html(self, width: int|None = None, **kwargs) -> str:
         """
         Export display as HTML.
 
@@ -906,11 +906,15 @@ class Displayable(ABC):
         >>> with open('output.html', 'w') as f:
         ...     f.write(html)
         """
-        console = Console(record=True)
-        console.print(self)
-        return console.export_html()
 
-    def to_svg(self) -> str:
+        if width is None:
+            width = self.display_settings.console_width
+
+        console = Console(record=True, width=width)
+        console.print(self)
+        return console.export_html(**kwargs)
+
+    def to_svg(self, width: int|None = None, **kwargs) -> str:
         """
         Export display as SVG.
 
@@ -925,9 +929,13 @@ class Displayable(ABC):
         >>> with open('output.svg', 'w') as f:
         ...     f.write(svg)
         """
-        console = Console(record=True)
+
+        if width is None:
+            width = self.display_settings.console_width
+
+        console = Console(record=True, width=width)
         console.print(self)
-        return console.export_svg()
+        return console.export_svg(**kwargs)
 
     # ---------- ---------- ---------- ---------- ---------- properties
     ...
