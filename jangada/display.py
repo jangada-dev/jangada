@@ -911,7 +911,7 @@ class Displayable(ABC):
             width = self.display_settings.console_width
 
         console = Console(record=True, width=width)
-        console.print(self)
+        console.print(self._display_panel())
         return console.export_html(**kwargs)
 
     def to_svg(self, width: int|None = None, **kwargs) -> str:
@@ -934,7 +934,7 @@ class Displayable(ABC):
             width = self.display_settings.console_width
 
         console = Console(record=True, width=width)
-        console.print(self)
+        console.print(self._display_panel())
         return console.export_svg(**kwargs)
 
     # ---------- ---------- ---------- ---------- ---------- properties
