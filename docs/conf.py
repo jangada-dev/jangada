@@ -13,9 +13,9 @@ import sys
 https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 """
 project = 'Jangada'
-copyright = '2025, Rafael R. L. Benevides, J. M. da Silva'
-author = 'Rafael R. L. Benevides, J. M. da Silva'
-version = '0.0.0-dev'
+copyright = '2026, Rafael R. L. Benevides'
+author = 'Rafael R. L. Benevides'
+version = '0.1.3'
 release = version
 
 
@@ -87,13 +87,6 @@ html_theme_options = {
 html_context = {
     "default_mode": "auto"
 }
-
-
-# ========== ========== ========== ========== ========== autodoc
-"""
-https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html#configuration
-"""
-sys.path.insert(0, os.path.abspath('..'))
 
 
 # ========== ========== ========== ========== ========== autodoc
