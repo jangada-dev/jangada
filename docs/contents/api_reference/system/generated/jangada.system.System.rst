@@ -60,7 +60,9 @@
       ~System.load_serialized_data
       ~System.remove
       ~System.save
+      ~System.save_png
       ~System.save_serialized_data
+      ~System.save_svg
       ~System.serialize
       ~System.to_html
       ~System.to_svg

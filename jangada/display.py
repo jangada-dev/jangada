@@ -942,7 +942,7 @@ class Displayable(ABC):
 
         kwargs = {
             'title': '',
-            'code_format': CONSOLE_SVG_FORMAT.replace("{chrome}", "")
+            'code_format': CONSOLE_SVG_FORMAT.replace("{chrome}", ""),
             **kwargs
         }
 

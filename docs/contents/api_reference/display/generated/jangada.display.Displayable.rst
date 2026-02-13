@@ -39,6 +39,8 @@
       ~Displayable._title
       ~Displayable.format_as_form
       ~Displayable.format_as_table
+      ~Displayable.save_png
+      ~Displayable.save_svg
       ~Displayable.to_html
       ~Displayable.to_svg
    

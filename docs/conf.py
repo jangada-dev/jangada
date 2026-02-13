@@ -15,7 +15,7 @@ https://www.sphinx-doc.org/en/master/usage/configuration.html#project-informatio
 project = 'Jangada'
 copyright = '2026, Rafael R. L. Benevides'
 author = 'Rafael R. L. Benevides'
-version = '0.1.3'
+version = '0.1.4'
 release = version
 
 
