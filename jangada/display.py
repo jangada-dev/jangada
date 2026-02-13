@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pandas
 
+from pathlib import Path
+
 from abc import ABC, abstractmethod
 
 from io import StringIO
@@ -22,8 +24,7 @@ from rich.console import Console, RenderableType
 from rich.table import Table
 from rich import box
 from rich.align import Align
-
-from typing import Any
+from rich._export_format import CONSOLE_SVG_FORMAT
 
 from jangada import Persistable, SerializableProperty
 
@@ -576,6 +577,9 @@ class Displayable(ABC):
 
         return string_io.getvalue()
 
+    def __repr__(self) -> str:
+        return self.__str__()
+
     def __rich__(self) -> RenderableType:
         """
         Rich protocol for direct rendering.
@@ -935,7 +939,31 @@ class Displayable(ABC):
 
         console = Console(record=True, width=width)
         console.print(self._display_panel())
+
+        kwargs = {
+            'title': '',
+            'code_format': CONSOLE_SVG_FORMAT.replace("{chrome}", "")
+            **kwargs
+        }
+
         return console.export_svg(**kwargs)
+
+    def save_svg(self, path: Path|str, **kwargs) -> None:
+        """"""
+        with Path(path).open('w') as file:
+            file.write(self.to_svg(**kwargs))
+
+    def save_png(self, path: Path|str, **kwargs) -> None:
+        try:
+            import cairosvg
+
+        except ImportError:
+            raise ImportError('cairosvg package not found. Install with "pip install cairosvg".')
+
+        svg = self.to_svg(**kwargs)
+
+        cairosvg.svg2png(bytestring=svg.encode(), write_to=path, dpi=300)
+
 
     # ---------- ---------- ---------- ---------- ---------- properties
     ...

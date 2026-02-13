@@ -23,7 +23,7 @@ pandas                  # https://pandas.pydata.org/docs/
 # fiona                   # https://fiona.readthedocs.io/en/latest/
 # shapely                 # https://shapely.readthedocs.io/en/stable/manual.html
 
-# ------------------------------------------------------------------ persisting
+# ------------------------------------------------------------------ display
 rich
 
 # ------------------------------------------------------------------ persisting
