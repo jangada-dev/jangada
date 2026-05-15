@@ -99,3 +99,13 @@ except PackageNotFoundError:
     __version__ = pyproject["project"]["version"]
     __author__ = pyproject["project"]["authors"][0]["name"]
     __license__ = pyproject["project"]["license"]["text"]
+
+
+_global_theme: str = "dark"
+
+def set_theme(theme: str) -> None:
+    """Set the global display theme ('dark' or 'light')."""
+    global _global_theme
+    if theme not in ("dark", "light"):
+        raise ValueError(f"theme must be 'dark' or 'light', got {theme!r}")
+    _global_theme = theme

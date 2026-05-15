@@ -571,9 +571,9 @@ class Displayable(ABC):
             New DisplaySettings with defaults.
         """
 
-        theme = Displayable._detect_theme()
+        from jangada import _global_theme
 
-        if theme == 'light':
+        if _global_theme == 'light':
             return DisplaySettings.light()
 
         else:
