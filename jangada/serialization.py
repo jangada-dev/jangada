@@ -1010,6 +1010,13 @@ class SerializableProperty:
         return self._copiable
 
 
+def sproperty(**kwargs):
+    def decorator(func):
+        prop = SerializableProperty(doc=func.__doc__, **kwargs)
+        prop = prop.parser(func)
+        return prop
+    return decorator
+
 # ========== ========== ========== ========== ========== ==========
 def get_full_qualified_name(cls: type) -> str:
     """

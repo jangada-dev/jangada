@@ -359,6 +359,25 @@ may make columns hard to distinguish. Very large values (>10) may make
 tables too wide for standard terminals.
 """)
 
+    @classmethod
+    def light(cls) -> DisplaySettings:
+        """Preset for light backgrounds (Jupyter, VSCode light, etc.)"""
+        s = cls()
+        s.panel_border_style = "blue"
+        s.property_style = "bold dark_orange"
+        s.table_header_style = "bold dark_orange"
+        s.table_index_style = "dim"
+        return s
+
+    @classmethod
+    def dark(cls) -> DisplaySettings:
+        """Preset for dark terminals (default)."""
+        s = cls()
+        s.panel_border_style = "bright_cyan"
+        s.property_style = "bold bright_yellow"
+        s.table_header_style = "bold bright_yellow"
+        s.table_index_style = None
+        return s
 
 class Displayable(ABC):
     """
@@ -551,7 +570,27 @@ class Displayable(ABC):
         DisplaySettings
             New DisplaySettings with defaults.
         """
-        return DisplaySettings()
+
+        theme = Displayable._detect_theme()
+
+        if theme == 'light':
+            return DisplaySettings.light()
+
+        else:
+            return DisplaySettings()
+
+    @staticmethod
+    def _detect_theme() -> str:
+        """Heuristic: notebooks tend to be light."""
+        import os
+        # Jupyter sets this env var
+        if "JPY_PARENT_PID" in os.environ or "JUPYTER_RUNTIME_DIR" in os.environ:
+            return "light"
+        # VS Code sets this
+        if os.environ.get("TERM_PROGRAM") == "vscode":
+            vscode_theme = os.environ.get("VSCODE_THEME_KIND", "")
+            return "light" if "light" in vscode_theme.lower() else "dark"
+        return "dark"
 
     # ========== ========== ========== ========== ========== special methods
     def __str__(self) -> str:
@@ -660,6 +699,9 @@ class Displayable(ABC):
             expand=False,
             box=getattr(box, self.display_settings.panel_box)
         )
+
+    def _repr_html_(self) -> str:
+        return self.to_html()
 
     # ========== ========== ========== ========== ========== public methods
     def format_as_form(self, data: dict[str, str]|pandas.Series) -> Table:
@@ -913,6 +955,9 @@ class Displayable(ABC):
 
         if width is None:
             width = self.display_settings.console_width
+
+        kwargs.setdefault("code_format", "{code}")
+        kwargs.setdefault("inline_styles", True)
 
         console = Console(record=True, width=width)
         console.print(self._display_panel())
