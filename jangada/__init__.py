@@ -64,6 +64,7 @@ __all__ = [
     "Serializable",
     "Persistable",
     "SerializableProperty",
+    "sproperty",
     "Identifiable",
     "Taggable",
     "Nameable",

@@ -379,6 +379,7 @@ tables too wide for standard terminals.
         s.table_index_style = None
         return s
 
+
 class Displayable(ABC):
     """
     Abstract base for objects with Rich terminal display.
@@ -959,7 +960,7 @@ class Displayable(ABC):
         kwargs.setdefault("code_format", "{code}")
         kwargs.setdefault("inline_styles", True)
 
-        console = Console(record=True, width=width)
+        console = Console(record=True, width=width, file=None, quiet=True)
         console.print(self._display_panel())
         return console.export_html(**kwargs)
 
@@ -982,7 +983,7 @@ class Displayable(ABC):
         if width is None:
             width = self.display_settings.console_width
 
-        console = Console(record=True, width=width)
+        console = Console(record=True, width=width, file=None, quiet=True)
         console.print(self._display_panel())
 
         kwargs = {

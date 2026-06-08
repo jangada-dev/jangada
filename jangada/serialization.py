@@ -3432,4 +3432,5 @@ __all__ = [
     'Serializable',
     'Persistable',
     'load',
+    'sproperty'
 ]
